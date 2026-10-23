@@ -60,6 +60,8 @@ class HTTP:
                     code = candidate
             except (ValueError,AttributeError):
                 pass
+            finally:
+                exc.close()
             raise SyncError(f"HTTP {exc.code}: {code}",status=exc.code,code=code) from None
         except (OSError,ValueError) as exc:
             # Deliberately omit URL, request, token and untrusted remote body.
@@ -121,6 +123,21 @@ def publish_state(http, rid, state):
         return
 
 
+def resolve_organization(http, selector, projects):
+    # An existing project's stable organization ID also works with a project key,
+    # which need not be allowed to discover organizations.
+    if any(project.get("organization_id")==selector for project in projects):
+        return selector
+    organizations = http.request("GET","/organizations").get("organizations",[])
+    matches = [org for org in organizations if org.get("id")==selector] or [org for org in organizations if org.get("slug")==selector]
+    if len(matches)!=1:
+        raise SyncError("ORGANIZATION_NOT_FOUND_OR_AMBIGUOUS: use an accessible stable organization ID")
+    oid = matches[0].get("id")
+    if type(oid) is not str or not oid:
+        raise SyncError("remote organization has no valid ID")
+    return oid
+
+
 def sync_pass(root, config):
     """Read a bounded work unit; caller applies returned ACKs on its sole writer."""
     db = readonly(root)
@@ -152,11 +169,36 @@ def sync_pass(root, config):
                     raise SyncError("REMOTE_TARGET_MISMATCH: credentials do not match this run's bound server")
                 http = HTTP(server,run_config.get("api_key"),run_config.get("timeout",4))
                 projects = http.request("GET","/projects").get("projects",[])
-                project = next((p for p in projects if p.get("id") == run["project"] or p.get("slug") == run["project"]),None)
-                if project is None and run_config.get("create_project"):
-                    project = http.request("POST","/projects",{"slug":run["project"],"name":run["project"]})
+                organization_id = run.get("remote_organization")
+                requested = run_config.get("organization")
+                selectors = []
+                if not organization_id:
+                    selectors.append(run.get("organization"))
+                if requested not in (None,run.get("organization"),organization_id):
+                    selectors.append(requested)
+                for selector in dict.fromkeys(value for value in selectors if value is not None):
+                    resolved = resolve_organization(http,selector,projects)
+                    if organization_id and organization_id!=resolved:
+                        raise SyncError("REMOTE_ORGANIZATION_MISMATCH: run organization binding cannot change")
+                    organization_id = resolved
+                target = run["remote_project"] or run["project"]
+                matches = [p for p in projects if p.get("id")==target] or [p for p in projects if p.get("slug")==target and not run["remote_project"]]
+                if len(matches)>1:
+                    raise SyncError("PROJECT_AMBIGUOUS: use a stable project ID")
+                project = matches[0] if matches else None
+                if project is None and run_config.get("create_project") and not run["remote_project"]:
+                    body = {"slug":run["project"],"name":run["project"]}
+                    if organization_id:
+                        body["organization_id"] = organization_id
+                        result["organization_id"] = organization_id
+                    project = http.request("POST","/projects",body)
                 if project is None:
                     raise SyncError("PROJECT_NOT_FOUND: create project explicitly or use a permitted project ID")
+                remote_organization = project.get("organization_id")
+                if organization_id and remote_organization!=organization_id:
+                    raise SyncError("REMOTE_ORGANIZATION_MISMATCH: project does not match the selected organization")
+                if type(remote_organization) is str and remote_organization:
+                    result["organization_id"] = remote_organization
                 pid = project["id"]
                 if run["remote_project"] and run["remote_project"] != pid:
                     raise SyncError("remote project mapping conflict")

@@ -35,8 +35,11 @@ class FinishReceipt:
 
 
 class Run:
-    def __init__(self, project, run_path, config=None, tags=None, *, spool_dir="./outputs/mlboard-runs", sync="off", server=None, api_key=None, mode="safe", retention="record", run_id=None, session_id=None, session_ordinal=None, producer_id="rank0", primary_producer="rank0", name=None, create_project=False, queue_events=512, queue_bytes=8*1024**2, elapsed_offset=None, _start_sender=True):
+    def __init__(self, project, run_path, config=None, tags=None, *, spool_dir="./outputs/mlboard-runs", sync="off", server=None, api_key=None, mode="safe", retention="record", run_id=None, session_id=None, session_ordinal=None, producer_id="rank0", primary_producer="rank0", name=None, create_project=False, organization=None, queue_events=512, queue_bytes=8*1024**2, elapsed_offset=None, _start_sender=True):
         text(project,"project",256)
+        organization = organization if organization is not None else os.environ.get("MLBOARD_ORGANIZATION")
+        if organization is not None and not text(organization,"organization",256):
+            raise ValidationError("organization must be a nonempty ID or slug")
         validate_path(run_path)
         if mode not in ("safe","strict") or sync not in ("off","background") or retention not in ("record","cache"):
             raise ValidationError("invalid mode, sync or retention")
@@ -73,7 +76,7 @@ class Run:
         self._snapshot_at = 0.0
         self._last_error = None
         self._wait_remote = False
-        self._register = {"kind":"register","id":"register","token":uuid.uuid4().hex,"run_id":self.id,"session_id":self.session_id,"session_ordinal":session_ordinal,"producer_id":producer_id,"primary_producer":primary_producer,"project":project,"run_path":run_path,"config":json_value(config or {}),"tags":json_value(tags or []),"name":text(name or run_path.split('/')[-1],"name",200),"retention":retention,"sync":sync,"server":normalize_server(server or os.environ.get("MLBOARD_SERVER","http://127.0.0.1:8080")),"api_key":api_key or os.environ.get("MLBOARD_API_KEY"),"create_project":bool(create_project)}
+        self._register = {"kind":"register","id":"register","token":uuid.uuid4().hex,"run_id":self.id,"session_id":self.session_id,"session_ordinal":session_ordinal,"producer_id":producer_id,"primary_producer":primary_producer,"project":project,"run_path":run_path,"config":json_value(config or {}),"tags":json_value(tags or []),"name":text(name or run_path.split('/')[-1],"name",200),"retention":retention,"sync":sync,"server":normalize_server(server or os.environ.get("MLBOARD_SERVER","http://127.0.0.1:8080")),"api_key":api_key or os.environ.get("MLBOARD_API_KEY"),"create_project":bool(create_project),"organization":organization}
         if type(self._register["config"]) is not dict or type(self._register["tags"]) is not list or any(type(t) is not str for t in self._register["tags"]):
             raise ValidationError("config must be an object; tags must be a list of strings")
         self._register_frame = frame(self._register)
