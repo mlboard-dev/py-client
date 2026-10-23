@@ -22,10 +22,13 @@ def _run():
 def log(values, **coordinates):
     return _run().log(values,**coordinates)
 
+def log_scalar(name, value, **coordinates):
+    return _run().log_scalar(name,value,**coordinates)
+
 def finish(**options):
     return _run().finish(**options)
 
 def status():
     return _run().status()
 
-__all__ += ["log","finish","status"]
+__all__ += ["log","log_scalar","finish","status"]

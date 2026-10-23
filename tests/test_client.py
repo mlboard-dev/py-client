@@ -61,6 +61,19 @@ class TempCase(unittest.TestCase):
 
 
 class SDKTests(TempCase):
+    def test_scalar_tags_keep_their_own_steps_and_module_wrapper(self):
+        run=mlboard.init('vision','axes/per-metric',spool_dir=self.root)
+        receipts=[run.log_scalar('train/loss',.8,step=100,epoch=.5),mlboard.log_scalar('val/loss',.9,step=1,epoch=1),run.log_scalar('train/loss',.6,step=200,epoch=1),mlboard.log_scalar('val/loss',.7,step=2,epoch=2)]
+        self.assertTrue(all(receipt.accepted for receipt in receipts))
+        self.assertTrue(run.finish(timeout=5).complete)
+        query={'source':{'kind':'scalar','metrics':[{'name':'train/loss','context':{}},{'name':'val/loss','context':{}}]},'x':{'field':'step'},'transform':{'kind':'raw'}}
+        response=LocalQuery(self.root).execute(project_id('vision'),query)
+        frames={frame['meta']['metric']:frame['columns'] for frame in response['frames']}
+        self.assertEqual(frames['train/loss']['x'],['100','200'])
+        self.assertEqual(frames['val/loss']['x'],['1','2'])
+        self.assertEqual([ref['seq'] for ref in frames['train/loss']['event_ref']],['0','2'])
+        self.assertEqual([ref['seq'] for ref in frames['val/loss']['event_ref']],['1','3'])
+
     def test_training_log_never_uses_disk_network_or_tensor_conversion(self):
         class GPU:
             def item(self): raise AssertionError('item called')
@@ -374,19 +387,21 @@ class TensorBoardTests(TempCase):
         from mlboard.tensorboard import import_directory
         source=self.root/'source';source.mkdir()
         dest=self.root/'store';file=source/'events.out.tfevents.1.test'
-        def encode(step):
-            e=Event(wall_time=1700000000+step,step=step,summary=Summary(value=[Summary.Value(tag='train/loss',simple_value=1/(step+1))]))
+        def encode(step,tag):
+            e=Event(wall_time=1700000000+step,step=step,summary=Summary(value=[Summary.Value(tag=tag,simple_value=1/(step+1))]))
             payload=e.SerializeToString();length=struct.pack('<Q',len(payload))
             return length+struct.pack('<I',masked_crc(length))+payload+struct.pack('<I',masked_crc(payload))
-        first,second=encode(0),encode(1)
+        first,second,third,fourth=encode(100,'train/loss'),encode(1,'val/loss'),encode(200,'train/loss'),encode(2,'val/loss')
         file.write_bytes(first+second[:15])
         self.assertEqual(import_directory(source,dest)['imported_events'],1)
         self.assertEqual(import_directory(source,dest)['imported_events'],0)
-        with file.open('ab') as out: out.write(second[15:])
-        self.assertEqual(import_directory(source,dest)['imported_events'],1)
+        with file.open('ab') as out: out.write(second[15:]+third+fourth)
+        self.assertEqual(import_directory(source,dest)['imported_events'],3)
         with readonly(dest) as db:
-            self.assertEqual(db.execute('SELECT COUNT(*) FROM events').fetchone()[0],2)
-            self.assertEqual(db.execute('SELECT offset FROM import_offsets').fetchone()[0],len(first)+len(second))
+            self.assertEqual(db.execute('SELECT COUNT(*) FROM events').fetchone()[0],4)
+            self.assertEqual(db.execute('SELECT offset FROM import_offsets').fetchone()[0],sum(map(len,(first,second,third,fourth))))
+            self.assertEqual([row[0] for row in db.execute("SELECT step FROM scalars WHERE name='train/loss' ORDER BY seq")],[100,200])
+            self.assertEqual([row[0] for row in db.execute("SELECT step FROM scalars WHERE name='val/loss' ORDER BY seq")],[1,2])
         # Stop just this test's nested collector before deleting its store.
         pid=json.loads((dest/'collector.json').read_text())['pid'];os.kill(pid,signal.SIGTERM)
         with contextlib.suppress(ChildProcessError): os.waitpid(pid,0)
