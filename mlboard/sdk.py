@@ -13,7 +13,7 @@ import threading
 import time
 import uuid
 
-from .ipc import connect, extract, frame
+from .ipc import command, connect, extract, frame
 from .validation import MAX_EVENT, MAX_FIELDS, ValidationError, check_name, dumps, integer, json_value, now, run_path as validate_path, scalar, text, normalize_server
 
 
@@ -305,17 +305,29 @@ class Run:
         if not self._lock.acquire(timeout=max(0,deadline-time.monotonic())):
             return FinishReceipt(False,wait_for,self._accepted,self._durable,self._dropped,"finish queue busy")
         try:
+            self._wait_remote = wait_for=="remote"
             if not self._finished:
                 self._finished = True
-                self._wait_remote = wait_for=="remote"
                 self._finish_frame = frame({"kind":"finish","id":"finish","run_id":self.id,"state":state,"dropped":self._dropped})
         finally:
             self._lock.release()
         self._wake.set()
         if wait_for != "none":
             self._finish_ack.wait(max(0,deadline-time.monotonic()))
-            if wait_for == "remote" and self.sync == "background":
+            if wait_for == "remote" and self.sync == "background" and self._finish_ack.is_set():
+                # A previous local finish may already have stopped the sender.
+                # Explicit finish may use IPC; log() remains memory-only. Restore
+                # this run's credentials if the detached collector has restarted.
+                register = True
                 while time.monotonic()<deadline and not self._snapshot.get("remote_complete",False):
+                    try:
+                        message = self._register if register else {"kind":"status","run_id":self.id}
+                        reply = command(self.spool_dir,message,timeout=min(.5,max(.001,deadline-time.monotonic())))
+                        self._snapshot = {**self._snapshot,**reply.get("status",{})}
+                        self._snapshot_at = time.monotonic()
+                        register = False
+                    except (OSError,ValueError,RuntimeError) as exc:
+                        self._last_error = f"collector checkpoint: {type(exc).__name__}"
                     time.sleep(min(0.02,max(0,deadline-time.monotonic())))
         complete = self._finish_ack.is_set() and self._durable==self._accepted and self._rejected==0
         reason = None if complete else self._last_error or "timeout; remaining events may only exist in memory"
