@@ -238,8 +238,8 @@ class Run:
                 raise ValidationError("curve requires 2..512 equal nonnegative integer count arrays")
             if type(thresholds) not in (list,tuple) or len(thresholds)!=n:
                 raise ValidationError("thresholds must match counts")
-            if averaging not in ("binary","micro","macro","weighted","per_class"):
-                raise ValidationError("invalid averaging")
+            if averaging not in ("binary","micro","per_class"):
+                raise ValidationError("count-based curves support only binary, micro or per_class averaging")
             threshold_values,states = [],[]
             previous = -math.inf
             for t in thresholds:
