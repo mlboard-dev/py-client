@@ -172,6 +172,14 @@ class Run:
             return self._failure(exc)
         return self._enqueue(fields,step=step,epoch=epoch,context=context,elapsed_seconds=elapsed_seconds,processed_samples=processed_samples)
 
+    def log_scalar(self, name, value, *, step=None, epoch=None, context=None, elapsed_seconds=None, processed_samples=None):
+        """Record one metric with this call's coordinates; other metrics are independent."""
+        try:
+            check_name(name)
+        except (ValueError,TypeError) as exc:
+            return self._failure(exc)
+        return self.log({name:value},step=step,epoch=epoch,context=context,elapsed_seconds=elapsed_seconds,processed_samples=processed_samples)
+
     def log_record(self, name, kind, payload, *, step=None, epoch=None, context=None):
         try:
             if kind not in ("histogram","confusion_matrix","curve","table","text","media"):
