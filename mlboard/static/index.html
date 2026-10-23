@@ -1,28 +1,135 @@
 <!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>MLBoard · Local experiments</title>
-<style>
-:root{color-scheme:light;--ink:#193331;--muted:#607572;--border:#dbe6e1;--green:#14665a;--paper:#f3f6f3;--white:#fff;font:14px system-ui,-apple-system,sans-serif}*{box-sizing:border-box}body{margin:0;background:var(--paper);color:var(--ink)}button,select,input,textarea{font:inherit;color:inherit}button,select,input{background:white;border:1px solid var(--border);border-radius:7px;padding:8px 10px}button{cursor:pointer}button:hover{border-color:var(--green)}button.active{background:var(--green);color:white}header{padding:18px 24px;background:white;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:20px;flex-wrap:wrap}h1{font-size:19px;margin:0;letter-spacing:-.5px}small,.muted{color:var(--muted)}#notice{margin-left:auto;max-width:50%;font-size:12px}nav{display:flex;gap:6px;overflow:auto;padding:14px 24px;border-bottom:1px solid var(--border);background:#fafcf9}nav button{white-space:nowrap;border-color:transparent;background:none}.shell{display:grid;grid-template-columns:285px minmax(0,1fr);min-height:calc(100vh - 123px)}#experimentsToggle{display:none}aside{background:white;border-right:1px solid var(--border);padding:20px 16px}aside select,aside input[type=search]{width:100%;margin-bottom:12px}label.run{display:flex;gap:9px;padding:10px 3px;align-items:flex-start;border-bottom:1px solid #eef2ed;cursor:pointer}.run input{margin:4px 0}.run span{min-width:0;overflow-wrap:anywhere}.run small{display:block;margin-top:3px;font-size:11px}main{padding:22px;min-width:0}h2{font-size:20px;margin:0 0 6px}h3{font-size:14px;margin:0 0 12px}.tools{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin:18px 0}.tools label{display:flex;align-items:center;gap:7px}.tools input[type=range]{width:110px;padding:0}details.group{border:1px solid var(--border);background:#fbfdfb;border-radius:10px;margin:14px 0;overflow:hidden}summary{cursor:pointer;padding:14px;font-weight:600}summary small{font-weight:400;margin-left:12px}.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(330px,1fr));gap:16px;padding:0 14px 14px}.card{background:white;border:1px solid var(--border);border-radius:9px;padding:16px;min-width:0;box-shadow:0 3px 12px #19333104}.card h3{overflow-wrap:anywhere}.plot{width:100%;height:260px;display:block}.legend{display:flex;flex-wrap:wrap;gap:8px;font-size:11px;margin-top:7px}.legend span{display:flex;gap:5px;align-items:center}.swatch{width:9px;height:9px;border-radius:2px}.empty{padding:45px 18px;text-align:center;color:var(--muted)}pre{background:#f5f7f3;border-radius:6px;padding:13px;overflow:auto;font-size:12px;max-height:430px;white-space:pre-wrap;overflow-wrap:anywhere}textarea{width:100%;min-height:320px;padding:14px;border:1px solid var(--border);border-radius:8px;font:12px ui-monospace,monospace;background:white}table{width:100%;border-collapse:collapse;font-size:12px}td,th{padding:8px;border-bottom:1px solid var(--border);text-align:left}th{color:var(--muted)}.native{overflow:auto;margin-bottom:20px}.native img{max-width:100%;max-height:400px}a{color:var(--green)}#error{background:#fff1ec;color:#a33d27;padding:12px;border:1px solid #f2c7ba;border-radius:6px;margin-bottom:16px;display:none}.state{font-size:10px;text-transform:uppercase;color:var(--green)}.pagination{margin-top:12px}.stats{display:flex;gap:12px;flex-wrap:wrap;margin:18px 0}.stat{padding:18px;background:white;border:1px solid var(--border);border-radius:8px;min-width:150px}.stat b{display:block;font-size:23px;margin:5px 0}@media(max-width:760px){header{padding:14px;gap:10px}#notice{max-width:100%;margin:0}.shell{display:block}#experimentsToggle{display:flex;align-items:center;justify-content:space-between;width:calc(100% - 28px);margin:12px 14px 0;padding:11px 14px;text-align:left}#experimentsToggle::after{content:"▾"}#experimentsToggle[aria-expanded=true]::after{content:"▴"}#experiments:not(.expanded){display:none}aside{border-right:0;border-bottom:1px solid var(--border)}main{padding:14px}nav{padding:9px}.cards{grid-template-columns:1fr;padding:0 8px 8px}h2{font-size:19px}}@media(prefers-reduced-motion:no-preference){.card{animation:appear .18s ease}@keyframes appear{from{opacity:.3;transform:translateY(3px)}to{opacity:1;transform:none}}}
-</style><header><h1>◒ MLBoard</h1><span id="notice"></span></header>
-<nav id="nav"></nav><div class="shell"><button id="experimentsToggle" aria-controls="experiments" aria-expanded="false">Experiments · 0 selected</button><aside id="experiments"><h3>EXPERIMENTS</h3><select id="project" aria-label="Project"></select><input id="search" type="search" placeholder="Search run paths" aria-label="Search run paths"><div id="runs"></div><button id="moreRuns" hidden>Load more</button></aside><main><div id="error" role="alert"></div><div id="content"></div></main></div>
+<script src="/assets/local-preferences.js"></script>
+<script id="local-bootstrap">
+window.mlboardLocalStorage={getItem:key=>{try{return localStorage.getItem(key)}catch{return null}},setItem:(key,value)=>{try{localStorage.setItem(key,value)}catch{}}};
+window.mlboardLocalPreferences=MLBoardLocal.createPreferences({storage:window.mlboardLocalStorage,language:navigator.language,media:window.matchMedia('(prefers-color-scheme: dark)')});
+const initialPreferences=window.mlboardLocalPreferences.snapshot();
+document.documentElement.lang=initialPreferences.language;
+document.documentElement.dataset.theme=initialPreferences.resolvedTheme;
+</script>
+<link rel="stylesheet" href="/assets/viewer.css"><header><h1>◒ MLBoard</h1><span id="notice"></span><div class="local-settings"><label><span id="languageLabel" class="visually-hidden"></span><select id="language" aria-labelledby="languageLabel"><option value="en">English</option><option value="zh-CN">中文</option></select></label><label><span id="themeLabel" class="visually-hidden"></span><select id="theme" aria-labelledby="themeLabel"><option value="system"></option><option value="light"></option><option value="dark"></option></select></label></div></header>
+<nav id="nav"></nav><div class="shell"><button id="experimentsToggle" aria-controls="experiments" aria-expanded="false">Experiments · 0 selected</button><aside id="experiments"><h3 id="experimentsHeading"></h3><select id="project" aria-label="Project"></select><input id="search" type="search" placeholder="Search run paths" aria-label="Search run paths"><div id="runs"></div><button id="moreRuns" hidden>Load more</button></aside><main><div id="error" role="alert"></div><div id="content"></div></main></div>
 <script>
 'use strict';
 const $=s=>document.querySelector(s), el=(tag,text,cls)=>{const n=document.createElement(tag);if(text!==undefined)n.textContent=text;if(cls)n.className=cls;return n};
-const palette=['#13786b','#bc7245','#4b70b5','#aa536e','#7d8038','#7b5da1','#388f99','#cb9461','#5c7483','#9c643f'];
-let project='',runs=[],selected=new Set(),view='workspace',series=[],groups=new Map(),axes=localStorage.getItem('mlboard-axis')||'step',smooth=Number(localStorage.getItem('mlboard-smooth')||0),controller=null,generation=0,nextRun=null;
+const local=MLBoardLocal,preferences=window.mlboardLocalPreferences,preferenceStorage=window.mlboardLocalStorage;
+const bindings=new Set(),responseBytes=new WeakMap();
+let activeError=null,lastChartStatus=null;
+const language=()=>preferences.snapshot().language;
+const t=(key,params)=>local.translate(language(),key,params);
+let project='',runs=[],selected=new Set(),view='workspace',series=[],groups=new Map(),smooth=Number(preferenceStorage.getItem('mlboard-smooth')||0),controller=null,generation=0,nextRun=null;
+if(!Number.isFinite(smooth)||smooth<0||smooth>.95)smooth=0;
 const names=new Map(), cache=new Map(), plotViews=new Map();
-function error(e){$('#error').textContent=e.message||String(e);$('#error').style.display='block'}
-function clearError(){$('#error').style.display='none'}
-async function api(path,options={}){const res=await fetch('/api/v1'+path,{...options,headers:{'Content-Type':'application/json',...(options.headers||{})}});const body=await res.json();if(!res.ok)throw Object.assign(Error(body.error?.message||'Request failed'),{status:res.status,code:body.error?.code});return body}
-function readable(n){return n<1024?n+' B':n<1048576?(n/1024).toFixed(1)+' KiB':(n/1048576).toFixed(1)+' MiB'}
+function bind(node,key,params={},attribute=null){
+  const entry={node,key,params,attribute};bindings.add(entry);updateBinding(entry);return node;
+}
+function updateBinding(entry){
+  const text=typeof entry.key==='function'?entry.key():t(entry.key,typeof entry.params==='function'?entry.params():entry.params);
+  if(entry.attribute)entry.node.setAttribute(entry.attribute,text);else entry.node.textContent=text;
+}
+function ui(tag,key,params={},cls){return bind(el(tag,undefined,cls),key,params)}
+function updateBindings(){for(const entry of bindings){if(!entry.node.isConnected)bindings.delete(entry);else updateBinding(entry)}}
+function pruneBindings(){for(const entry of bindings)if(!entry.node.isConnected)bindings.delete(entry)}
+function codedError(code,message=code){return Object.assign(Error(message),{code})}
+function error(e){activeError=e;$('#error').textContent=local.errorText(language(),e);$('#error').style.display='block'}
+function clearError(){activeError=null;$('#error').style.display='none'}
+async function api(path,options={}){
+  const res=await fetch('/api/v1'+path,{...options,headers:{'Content-Type':'application/json',...(options.headers||{})}});
+  const raw=await res.text(),body=JSON.parse(raw);responseBytes.set(body,new TextEncoder().encode(raw).length);
+  if(!res.ok)throw Object.assign(Error(body.error?.message||'Request failed'),{status:res.status,code:body.error?.code,protocol:body});return body;
+}
+function formatNumber(value,options={}){return local.number(language(),value,options)}
+function readable(n){return n<1024?formatNumber(n)+' B':n<1048576?formatNumber(n/1024,{maximumFractionDigits:1})+' KiB':formatNumber(n/1048576,{maximumFractionDigits:1})+' MiB'}
+function timeLabel(value){return new Intl.DateTimeFormat(language(),{hour:'2-digit',minute:'2-digit',second:'2-digit'}).format(new Date(value))}
+function tickLabel(value,digits=4){const absolute=Math.abs(value);return formatNumber(value,{maximumSignificantDigits:digits,useGrouping:false,notation:absolute>=100000||(absolute>0&&absolute<.001)?'scientific':'standard'})}
+function chartStatus(){if(lastChartStatus)$('#notice').textContent=t('chart.updated',{count:lastChartStatus.points,time:timeLabel(lastChartStatus.time)})}
+function selectedLabel(){$('#experimentsToggle').textContent=t('experiments.selected',{count:selected.size})}
 function runName(id){return names.get(id)||id.slice(0,8)}
-function stableColor(id){let h=0;for(const c of id)h=(h*31+c.charCodeAt(0))>>>0;return palette[h%palette.length]}
+function stableColor(id){let h=0;for(const c of id)h=(h*31+c.charCodeAt(0))>>>0;return 'var(--series-'+h%10+')'}
 function cancel(){generation++;chartQueue.cancel();plotViews.clear();if(controller)controller.abort();controller=new AbortController()}
-async function boot(){try{const hash=new URLSearchParams(location.hash.slice(1));const token=hash.get('token');if(token){history.replaceState(null,'',location.pathname);const r=await fetch('/api/local/session',{method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:'{}'});if(!r.ok)throw Error('Local session could not be opened')}const p=await api('/projects');for(const item of p.projects){const opt=el('option',item.name);opt.value=item.id;$('#project').append(opt)}if(!p.projects.length){$('#content').append(el('div','No experiments recorded yet.','empty'));return}project=p.projects[0].id;await loadRuns();await render()}catch(e){error(e)}}
+async function boot(){
+  try{
+    const hash=new URLSearchParams(location.hash.slice(1)),token=hash.get('token');
+    if(token){
+      history.replaceState(null,'',location.pathname);
+      const r=await fetch('/api/local/session',{method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:'{}'});
+      if(!r.ok)throw codedError('SESSION_FAILED');
+    }
+    const p=await api('/projects');
+    for(const item of p.projects){const option=el('option',item.name);option.value=item.id;$('#project').append(option)}
+    if(!p.projects.length){$('#content').append(ui('div','empty.experiments',{},'empty'));return}
+    project=p.projects[0].id;await loadRuns();await render();
+  }catch(e){error(e)}
+}
 async function loadRuns(append=false){const q=new URLSearchParams({search:$('#search').value,limit:'100'});if(append&&nextRun)q.set('cursor',nextRun);const data=await api('/projects/'+project+'/runs?'+q);runs=append?[...runs,...data.runs]:data.runs;nextRun=data.next_cursor;for(const r of runs)names.set(r.id,r.run_path);if(!append){selected=new Set(runs.slice(0,Math.min(3,runs.length)).map(r=>r.id))}drawRuns()}
-function drawRuns(){const box=$('#runs');box.replaceChildren();let last='';for(const run of runs){const prefix=run.run_path.includes('/')?run.run_path.slice(0,run.run_path.lastIndexOf('/')):'Ungrouped';if(prefix!==last){box.append(el('small',prefix));last=prefix}const label=el('label',undefined,'run'),check=el('input');check.type='checkbox';check.checked=selected.has(run.id);check.onchange=()=>{if(check.checked&&selected.size>=10){check.checked=false;error(Error('Select at most 10 runs'));return}check.checked?selected.add(run.id):selected.delete(run.id);render()};const body=el('span',run.name||run.run_path);body.append(el('small',run.run_path),el('small',run.state,'state'));label.append(check,body);box.append(label)}$('#moreRuns').hidden=!nextRun}
-function drawNav(){const nav=$('#nav');nav.replaceChildren();for(const [id,label] of [['workspace','Workspace'],['config','Config & summary'],['records','Structured data'],['files','Files'],['logs','Logs'],['query','Query inspector'],['storage','Storage & sync']]){const b=el('button',label,id===view?'active':'');b.onclick=()=>{view=id;render()};nav.append(b)}}
-async function render(){cancel();clearError();drawNav();$('#experimentsToggle').textContent='Experiments · '+selected.size+' selected';const gen=generation,content=$('#content');content.replaceChildren();content.append(el('h2',{workspace:'Experiment workspace',config:'Run configuration',records:'Structured data',files:'Recorded files',logs:'Training logs',query:'Query inspector',storage:'Storage & sync'}[view]));if(!selected.size&&view!=='storage'){content.append(el('div','Select an experiment in the list.','empty'));return}try{if(view==='workspace')await workspace(gen);else if(view==='query')queryEditor();else if(view==='storage')await storage();else await detail(gen)}catch(e){if(e.name!=='AbortError')error(e)}}
-function querySpec(metrics){return {schema_version:'mlboard.query/v1',runs:{run_ids:[...selected]},source:{kind:'scalar',metrics:metrics.map(m=>({name:m.name,context:m.context||{}}))},x:{field:axes},read:{producers:{mode:'primary'},sessions:{mode:'all'},duplicate_steps:'latest_logical'},transform:{kind:'downsample',algorithm:'min_max',points_per_series:600},page:{limit:20000},budget:{max_runs:10,max_series:20,max_points:20000,max_scanned_points:250000,max_bytes:2097152}}}
-async function workspace(gen){const c=$('#content');const tools=el('div',undefined,'tools'),axis=el('select');for(const [v,l] of [['step','Step'],['epoch','Epoch'],['elapsed_seconds','Elapsed seconds'],['session_elapsed_seconds','Session seconds'],['wall_time','Wall time'],['processed_samples','Processed samples']]){const o=el('option',l);o.value=v;o.selected=axes===v;axis.append(o)}axis.onchange=()=>{axes=axis.value;localStorage.setItem('mlboard-axis',axes);drawVisible(gen)};const axisLabel=el('label','X axis');axisLabel.append(axis);const smoothing=el('input');smoothing.type='range';smoothing.min=0;smoothing.max=.95;smoothing.step=.05;smoothing.value=smooth;const smoothLabel=el('label','Smoothing');smoothLabel.append(smoothing);smoothing.oninput=()=>{smooth=Number(smoothing.value);localStorage.setItem('mlboard-smooth',smooth);drawVisible(gen)};const refresh=el('button','Refresh');refresh.onclick=()=>drawVisible(gen,true);tools.append(axisLabel,smoothLabel,refresh);c.append(tools);const unique=new Map();for(const rid of selected){let cursor=null,total=0;do{const q=cursor?'?limit=1000&cursor='+encodeURIComponent(cursor):'?limit=1000';const res=await api('/runs/'+rid+'/series'+q,{signal:controller.signal});for(const m of res.series)if(m.kind==='scalar')unique.set(m.name+'|'+JSON.stringify(m.context),m);cursor=res.next_cursor;total+=res.series.length;if(total>=1000&&cursor)throw Error('Metric directory exceeds 1,000 entries; use the query inspector with explicit names')}while(cursor)}if(gen!==generation)return;series=[...unique.values()].sort((a,b)=>a.name.localeCompare(b.name));groups=new Map();for(const m of series){const key=m.name.includes('/')?m.name.slice(0,m.name.lastIndexOf('/')):'Metrics';if(!groups.has(key))groups.set(key,[]);groups.get(key).push(m)}let i=0;for(const [key,metrics] of groups){const group=el('details',undefined,'group');group.dataset.group=key;const saved=localStorage.getItem('mlboard-group-'+key);group.open=saved===null?i++===0:saved==='true';const title=el('summary',key);title.append(el('small',metrics.length+' metrics'));group.append(title,el('div',undefined,'cards'));let previousOpen=group.open;group.ontoggle=()=>{if(group.open===previousOpen)return;previousOpen=group.open;localStorage.setItem('mlboard-group-'+key,String(group.open));if(!group.open)group.querySelector('.cards').replaceChildren();drawVisible(gen)};c.append(group)}if(!series.length)c.append(el('div','No scalar observations have been recorded yet.','empty'));await drawVisible(gen)}
+function drawRuns(){
+  const box=$('#runs');box.replaceChildren();let last=null;
+  for(const run of runs){
+    const prefix=run.run_path.includes('/')?run.run_path.slice(0,run.run_path.lastIndexOf('/')):'';
+    if(prefix!==last){box.append(prefix?el('small',prefix):ui('small','experiments.ungrouped'));last=prefix}
+    const label=el('label',undefined,'run'),check=el('input');check.type='checkbox';check.checked=selected.has(run.id);
+    check.onchange=()=>{
+      if(check.checked&&selected.size>=10){check.checked=false;error(codedError('RUN_LIMIT'));return}
+      check.checked?selected.add(run.id):selected.delete(run.id);render();
+    };
+    const body=el('span',run.name||run.run_path);
+    const state=local.messages.en['state.'+run.state]?ui('small','state.'+run.state,{},'state'):el('small',run.state,'state');
+    body.append(el('small',run.run_path),state);label.append(check,body);box.append(label);
+  }
+  $('#moreRuns').hidden=!nextRun;selectedLabel();pruneBindings();
+}
+function drawNav(){
+  const nav=$('#nav');nav.replaceChildren();
+  for(const id of ['workspace','config','records','files','logs','query','storage']){
+    const button=ui('button','nav.'+id,{},id===view?'active':'');button.onclick=()=>{view=id;render()};nav.append(button);
+  }
+}
+async function render(){
+  cancel();clearError();drawNav();selectedLabel();
+  const gen=generation,content=$('#content');content.replaceChildren();content.append(ui('h2','view.'+view));
+  if(!selected.size&&view!=='storage'){content.append(ui('div','empty.selection',{},'empty'));pruneBindings();return}
+  try{
+    if(view==='workspace')await workspace(gen);else if(view==='query')queryEditor();else if(view==='storage')await storage();else await detail(gen);
+  }catch(e){if(e.name!=='AbortError')error(e)}
+  pruneBindings();
+}
+function querySpec(metrics,axis='step'){return {schema_version:'mlboard.query/v1',runs:{run_ids:[...selected]},source:{kind:'scalar',metrics:metrics.map(m=>({name:m.name,context:m.context||{}}))},x:{field:axis},read:{producers:{mode:'primary'},sessions:{mode:'all'},duplicate_steps:'latest_logical'},transform:{kind:'downsample',algorithm:'min_max',points_per_series:600},page:{limit:20000},budget:{max_runs:10,max_series:20,max_points:20000,max_scanned_points:250000,max_bytes:2097152}}}
+async function workspace(gen){
+  const content=$('#content'),tools=el('div',undefined,'tools'),smoothing=el('input');
+  smoothing.type='range';smoothing.min=0;smoothing.max=.95;smoothing.step=.05;smoothing.value=smooth;
+  bind(smoothing,'chart.smoothing',{},'aria-label');
+  const smoothLabel=el('label');smoothLabel.append(ui('span','chart.smoothing'),smoothing);
+  smoothing.oninput=()=>{smooth=Number(smoothing.value);preferenceStorage.setItem('mlboard-smooth',smooth);drawVisible(gen)};
+  const refresh=ui('button','action.refresh');refresh.onclick=()=>drawVisible(gen,true);tools.append(smoothLabel,refresh);content.append(tools);
+  const unique=new Map();
+  for(const rid of selected){
+    let cursor=null,total=0;
+    do{
+      const suffix=cursor?'?limit=1000&cursor='+encodeURIComponent(cursor):'?limit=1000';
+      const response=await api('/runs/'+rid+'/series'+suffix,{signal:controller.signal});
+      for(const metric of response.series)if(metric.kind==='scalar')unique.set(metricKey(metric),metric);
+      cursor=response.next_cursor;total+=response.series.length;
+      if(total>=1000&&cursor)throw codedError('METRIC_LIMIT');
+    }while(cursor);
+  }
+  if(gen!==generation)return;
+  series=[...unique.values()].sort((a,b)=>a.name.localeCompare(b.name));groups=new Map();
+  for(const metric of series){const key=metric.name.includes('/')?metric.name.slice(0,metric.name.lastIndexOf('/')):'';if(!groups.has(key))groups.set(key,[]);groups.get(key).push(metric)}
+  let index=0;
+  for(const [key,metrics] of groups){
+    const group=el('details',undefined,'group');group.dataset.group=key;
+    const saved=preferenceStorage.getItem('mlboard-group-'+key);group.open=saved===null?index++===0:saved==='true';
+    const title=el('summary');title.append(key?document.createTextNode(key):ui('span','chart.metrics'),ui('small','chart.metricCount',{count:metrics.length}));
+    group.append(title,el('div',undefined,'cards'));let previousOpen=group.open;
+    group.ontoggle=()=>{
+      if(group.open===previousOpen)return;previousOpen=group.open;preferenceStorage.setItem('mlboard-group-'+key,String(group.open));
+      if(!group.open)group.querySelector('.cards').replaceChildren();drawVisible(gen);
+    };
+    content.append(group);
+  }
+  if(!series.length)content.append(ui('div','empty.scalars',{},'empty'));
+  await drawVisible(gen);
+}
 class LatestQueryQueue {
   constructor(execute,onError=()=>{}){
     this.execute=execute;this.onError=onError;
@@ -62,59 +169,96 @@ class LatestQueryQueue {
   }
 }
 async function loadChartResponse(job,current){
-  const deadline=Date.now()+5000;
+  const deadline=job.deadline??Date.now()+5000;
   for(let attempt=0;attempt<8;attempt++){
     if(!current())throw new DOMException('Query superseded','AbortError');
     const remaining=deadline-Date.now();
-    if(remaining<=0)throw Error('Query timed out. Refresh to retry.');
+    if(remaining<=0)throw Object.assign(Error('Query timed out. Refresh to retry.'),{code:'CLIENT_QUERY_TIMEOUT'});
     const requestController=new AbortController();
     const timeout=setTimeout(()=>requestController.abort(),remaining);
     try{
       return await api('/projects/'+job.project+'/query',{method:'POST',body:JSON.stringify(job.spec),signal:requestController.signal});
     }catch(e){
-      if(e.name==='AbortError')throw Error('Query timed out. Refresh to retry.');
+      if(e.name==='AbortError')throw Object.assign(Error('Query timed out. Refresh to retry.'),{code:'CLIENT_QUERY_TIMEOUT'});
       if(e.status!==429||e.code!=='QUERY_BUSY'||attempt===7)throw e;
     }finally{clearTimeout(timeout)}
     await new Promise(resolve=>setTimeout(resolve,Math.min(800,150*2**attempt,Math.max(0,deadline-Date.now()))));
   }
 }
-function metricKey(metric){return JSON.stringify([metric.name,metric.context||{}])}
+function metricKey(metric){return JSON.stringify([metric.name,Object.fromEntries(Object.keys(metric.context||{}).sort().map(key=>[key,metric.context[key]]))])}
+async function loadChartCohort(job,current){
+  const deadline=Date.now()+5000;
+  const remaining={max_series:20,max_points:20000,max_scanned_points:250000,max_bytes:2097152};
+  const results=[];
+  for(const group of job.axisGroups){
+    if(!current())throw new DOMException('Query superseded','AbortError');
+    const timeout=deadline-Date.now();
+    if(timeout<=0)throw codedError('CLIENT_QUERY_TIMEOUT');
+    if(Object.values(remaining).some(value=>value<=0))throw codedError('CLIENT_BUDGET_EXCEEDED');
+    const spec={...group.spec,page:{...group.spec.page,limit:remaining.max_points},budget:{...group.spec.budget,...remaining,timeout_ms:Math.min(2000,timeout)}};
+    const response=await loadChartResponse({project:job.project,spec,deadline},current);
+    if(!current())throw new DOMException('Query superseded','AbortError');
+    if(Date.now()>=deadline)throw codedError('CLIENT_QUERY_TIMEOUT');
+    const used={max_series:response.frames.length,max_points:response.page.returned_rows,max_scanned_points:response.diagnostics.scanned_points,max_bytes:responseBytes.get(response)??new TextEncoder().encode(JSON.stringify(response)).length};
+    if(response.complete!==true||response.page.next_cursor||response.diagnostics.truncated_by?.length)throw codedError('CLIENT_BUDGET_EXCEEDED');
+    for(const key of Object.keys(remaining)){
+      if(!Number.isSafeInteger(used[key])||used[key]<0||used[key]>remaining[key])throw codedError('CLIENT_BUDGET_EXCEEDED');
+      remaining[key]-=used[key];
+    }
+    results.push({...group,response});
+  }
+  return {groups:results,points:20000-remaining.max_points};
+}
 function chartCard(metric){return [...document.querySelectorAll('.card[data-metric]')].find(n=>n.dataset.metric===metricKey(metric))}
 function prepareChartCards(open,chosen){
   for(const group of open){
     const cards=group.querySelector('.cards');
     for(const metric of groups.get(group.dataset.group)||[]){
       let card=[...cards.children].find(n=>n.dataset.metric===metricKey(metric));
-      if(!card){card=el('div',undefined,'card');card.dataset.metric=metricKey(metric);cards.append(card)}
-      if(!chosen.includes(metric))card.replaceChildren(el('h3',metric.name),el('p','Query limit reached. Collapse another metric group or use Query inspector.','muted'));
-      else if(!card.querySelector('.plot'))card.replaceChildren(el('h3',metric.name),el('p','Loading observations…','muted'));
+      if(!card){
+        card=el('div',undefined,'card');card.dataset.metric=metricKey(metric);card.append(el('h3',metric.name));
+        if(Object.keys(metric.context||{}).length)card.append(el('pre',JSON.stringify(metric.context)));
+        const label=el('label',undefined,'chart-controls'),axisSelect=el('select');
+        label.append(ui('span','chart.axis'),axisSelect);bind(axisSelect,'chart.axis',{},'aria-label');
+        for(const axis of local.AXES){const option=ui('option','axis.'+axis);option.value=axis;axisSelect.append(option)}
+        const cardProject=project,cardGeneration=generation;
+        axisSelect.onchange=()=>{
+          if(cardGeneration!==generation||cardProject!==project)return;
+          local.writeAxis(preferenceStorage,cardProject,metric,axisSelect.value);drawVisible(cardGeneration);
+        };
+        card.append(label,el('div',undefined,'chart-content'));cards.append(card);
+      }
+      const axis=local.readAxis(preferenceStorage,project,metric),target=card.querySelector('.chart-content');
+      card.querySelector('select').value=axis;
+      if(!chosen.includes(metric)){target.dataset.axis='';target.replaceChildren(ui('p','chart.limit',{},'muted'))}
+      else if(target.dataset.axis!==axis){target.dataset.axis=axis;target.replaceChildren(ui('p','chart.loading',{},'muted'))}
     }
   }
 }
 const chartQueue=new LatestQueryQueue(async(job,current)=>{
-  let response;
-  if(!job.force&&cache.has(job.cacheKey))response=cache.get(job.cacheKey);
+  let cohort;
+  if(!job.force&&cache.has(job.cacheKey))cohort=cache.get(job.cacheKey);
   else{
-    response=await loadChartResponse(job,current);
-    cache.set(job.cacheKey,response);
+    cohort=await loadChartCohort(job,current);
+    cache.set(job.cacheKey,cohort);
     while(cache.size>8)cache.delete(cache.keys().next().value);
   }
   if(!current()||job.generation!==generation||view!=='workspace')return;
   clearError();
-  for(const metric of job.chosen){
-    const frames=response.frames.filter(f=>f.meta.metric===metric.name&&JSON.stringify(f.meta.context||{})===JSON.stringify(metric.context||{}));
-    const card=chartCard(metric);if(!card)continue;
-    card.replaceChildren(el('h3',metric.name));plot(card,frames,job.axis);
+  for(const group of cohort.groups)for(const metric of group.metrics){
+    const frames=group.response.frames.filter(frame=>metricKey({name:frame.meta.metric,context:frame.meta.context})===metricKey(metric));
+    const card=chartCard(metric),target=card?.querySelector('.chart-content');if(!target)continue;
+    target.replaceChildren();target.dataset.axis=group.axis;plot(target,frames,group.axis);
   }
-  prunePlots();
-  $('#notice').textContent=response.page.returned_rows+' points · '+new Date().toLocaleTimeString();
+  prunePlots();pruneBindings();lastChartStatus={points:cohort.points,time:Date.now()};chartStatus();
 },(e,job)=>{
   if(e.name==='AbortError'||job.generation!==generation||view!=='workspace')return;
   error(e);
   for(const metric of job.chosen){
-    const card=chartCard(metric);
-    if(card&&!card.querySelector('.plot'))card.replaceChildren(el('h3',metric.name),el('p',e.message,'muted'));
+    const card=chartCard(metric),target=card?.querySelector('.chart-content');
+    if(target&&!target.querySelector('.plot'))target.replaceChildren(bind(el('p',undefined,'muted'),()=>local.errorText(language(),e)));
   }
+  pruneBindings();
 });
 function drawVisible(gen,force=false){
   if(gen!==generation||view!=='workspace')return Promise.resolve(false);
@@ -123,8 +267,10 @@ function drawVisible(gen,force=false){
   if(!metrics.length){chartQueue.cancel();return Promise.resolve(false)}
   const maximum=Math.max(1,Math.floor(20/selected.size)),chosen=metrics.slice(0,maximum);
   prepareChartCards(open,chosen);prunePlots();
-  const spec=querySpec(chosen),cacheKey=JSON.stringify(spec);
-  return chartQueue.submit({key:gen+':'+project+':'+cacheKey,cacheKey,spec,project,generation:gen,chosen,axis:axes,force});
+  const byAxis=new Map();
+  for(const metric of chosen){const axis=local.readAxis(preferenceStorage,project,metric);if(!byAxis.has(axis))byAxis.set(axis,[]);byAxis.get(axis).push(metric)}
+  const axisGroups=[...byAxis].map(([axis,metrics])=>({axis,metrics,spec:querySpec(metrics,axis)})),cacheKey=JSON.stringify(axisGroups.map(group=>group.spec));
+  return chartQueue.submit({key:gen+':'+project+':'+cacheKey,cacheKey,axisGroups,project,generation:gen,chosen,force});
 }
 function svgEl(tag,attrs={}){const n=document.createElementNS('http://www.w3.org/2000/svg',tag);for(const [k,v] of Object.entries(attrs))n.setAttribute(k,String(v));return n}
 function prunePlots(){for(const node of plotViews.keys())if(!node.isConnected)plotViews.delete(node)}
@@ -142,7 +288,8 @@ function paintPlot(parent,frames,axis,smoothing){
   let origin=null;
   if(integerAxis)for(const f of frames)for(const x of f.columns.x){const exact=BigInt(x);if(origin===null||exact<origin)origin=exact}
   const position=x=>axis==='wall_time'?Date.parse(x):integerAxis?Number(BigInt(x)-origin):Number(x);
-  const labelX=x=>axis==='wall_time'?new Date(x).toLocaleTimeString():integerAxis?String(origin+BigInt(Math.round(x))):Number(x.toPrecision(4)).toString();
+  const labelX=x=>axis==='wall_time'?timeLabel(x):integerAxis?formatNumber(origin+BigInt(Math.round(x)),{useGrouping:false}):tickLabel(x);
+  const frameLabel=frame=>frame.meta.labelKey?t(frame.meta.labelKey):(frame.meta.label||runName(frame.meta.run_id));
   let all=[];
   const prepared=frames.map(f=>{
     let avg=null;
@@ -154,22 +301,22 @@ function paintPlot(parent,frames,axis,smoothing){
     });
     all.push(...points.filter(p=>p[1]!==null));return {f,points};
   });
-  if(!all.length){parent.append(el('div','No finite observations on this axis. Missing values are not zero.','empty'));return}
+  if(!all.length){parent.append(ui('div','empty.finite',{},'empty'));return}
   const xs=all.map(p=>p[0]),ys=all.map(p=>p[1]);
   let xmin=Math.min(...xs),xmax=Math.max(...xs),ymin=Math.min(...ys),ymax=Math.max(...ys);
   if(xmin===xmax)xmax=xmin+1;
   if(ymin===ymax){ymin-=.5;ymax+=.5}
   const pad=(ymax-ymin)*.07;ymin-=pad;ymax+=pad;
   const X=x=>L+(x-xmin)/(xmax-xmin)*(W-L-R),Y=y=>T+(ymax-y)/(ymax-ymin)*(H-T-B);
-  const svg=svgEl('svg',{viewBox:`0 0 ${W} ${H}`,class:'plot',role:'img','aria-label':'Recorded metric curves'});
+  const svg=svgEl('svg',{viewBox:`0 0 ${W} ${H}`,class:'plot',role:'img'});bind(svg,'chart.description',{},'aria-label');
   for(let i=0;i<=4;i++){
     const y=T+i*(H-T-B)/4;
-    svg.append(svgEl('line',{x1:L,x2:W-R,y1:y,y2:y,stroke:'#e5ece6'}));
-    const label=svgEl('text',{x:L-8,y:y+4,'text-anchor':'end',fill:'#75827a','font-size':11});
-    label.textContent=(ymax-i*(ymax-ymin)/4).toPrecision(3);svg.append(label);
+    svg.append(svgEl('line',{x1:L,x2:W-R,y1:y,y2:y,stroke:'var(--chart-grid)'}));
+    const label=svgEl('text',{x:L-8,y:y+4,'text-anchor':'end',fill:'var(--chart-axis)','font-size':11});
+    label.textContent=tickLabel(ymax-i*(ymax-ymin)/4,3);svg.append(label);
   }
   for(let i=0;i<=4;i++){
-    const value=xmin+i*(xmax-xmin)/4,label=svgEl('text',{x:X(value),y:H-12,'text-anchor':'middle',fill:'#75827a','font-size':11});
+    const value=xmin+i*(xmax-xmin)/4,label=svgEl('text',{x:X(value),y:H-12,'text-anchor':'middle',fill:'var(--chart-axis)','font-size':11});
     label.textContent=labelX(value);svg.append(label);
   }
   for(const {f,points} of prepared){
@@ -178,16 +325,16 @@ function paintPlot(parent,frames,axis,smoothing){
     const color=stableColor(f.meta.run_id),line=svgEl('path',{d:path,fill:'none',stroke:color,'stroke-width':2,'stroke-linejoin':'round'});
     svg.append(line);
     if(points.filter(p=>p[1]!==null).length===1){const p=points.find(p=>p[1]!==null);svg.append(svgEl('circle',{cx:X(p[0]),cy:Y(p[1]),r:3,fill:color}))}
-    const title=svgEl('title');title.textContent=(f.meta.label||runName(f.meta.run_id))+' · '+f.meta.metric;line.append(title);
+    const title=svgEl('title');title.textContent=frameLabel(f)+' · '+f.meta.metric;line.append(title);
   }
   parent.append(svg);
   const legend=el('div',undefined,'legend');
-  for(const {f} of prepared){const item=el('span'),dot=el('i',undefined,'swatch');dot.style.background=stableColor(f.meta.run_id);item.append(dot,document.createTextNode(f.meta.label||runName(f.meta.run_id)));legend.append(item)}
+  for(const {f} of prepared){const item=el('span'),dot=el('i',undefined,'swatch');dot.style.background=stableColor(f.meta.run_id);item.append(dot,document.createTextNode(frameLabel(f)));legend.append(item)}
   parent.append(legend);
 }
 function summaryTable(summary){
   const wrapper=el('div',undefined,'native'),table=el('table'),head=el('tr');
-  for(const name of ['Metric','Context','Last','Min','Max','Count'])head.append(el('th',name));
+  for(const name of ['metric','context','last','min','max','count'])head.append(ui('th','summary.'+name));
   table.append(head);
   const values=Object.values(summary).sort((a,b)=>a.name.localeCompare(b.name)||JSON.stringify(a.context).localeCompare(JSON.stringify(b.context)));
   for(const metric of values){
@@ -198,22 +345,127 @@ function summaryTable(summary){
   wrapper.append(table);return wrapper;
 }
 function jsonBlock(value){return el('pre',JSON.stringify(value,null,2))}
-async function detail(gen){const c=$('#content');for(const rid of selected){const section=el('section',undefined,'card');section.style.marginTop='16px';section.append(el('h3',runName(rid)));c.append(section);if(view==='config'){const r=await api('/runs/'+rid,{signal:controller.signal});if(gen!==generation)return;section.append(el('small','CONFIG'),jsonBlock(r.config),el('small','SUMMARY · PRIMARY LOGICAL STREAM'),summaryTable(r.summary),el('small','SOURCE & SESSIONS'),jsonBlock({run_id:r.id,state:r.state,retention:r.retention,sync:r.pending_mode?'background':'off',dropped:r.dropped,last_error:r.last_error}),jsonBlock(await api('/runs/'+rid+'/sessions')))}else if(view==='files'){const res=await api('/runs/'+rid+'/artifacts',{signal:controller.signal});if(gen!==generation)return;for(const file of res.artifacts){const p=el('p'),a=el('a',file.name);a.href='/api/v1/artifacts/'+encodeURIComponent(file.id)+'/content';a.target='_blank';a.rel='noopener';p.append(a,document.createTextNode(' · '+readable(file.size)+' · '+file.kind));section.append(p)}if(!res.artifacts.length)section.append(el('p','No files recorded.','muted'))}else{const kind=view==='logs'?'logs':'records';let cursor=null;const load=async()=>{const q=cursor?'?cursor='+encodeURIComponent(cursor):'';const res=await api('/runs/'+rid+'/'+kind+q,{signal:controller.signal});if(gen!==generation)return;for(const item of res[kind]){if(kind==='logs'){const line=el('pre',item.time+'  '+item.level.toUpperCase()+'  '+item.message);section.append(line)}else renderRecord(section,item)}cursor=res.next_cursor;more.hidden=!cursor};const more=el('button','Load more','pagination');more.onclick=()=>load().catch(error);await load();section.append(more)}}}
-function renderRecord(parent,item){const native=el('div',undefined,'native');parent.append(native);native.append(el('h3',item.name+' · '+item.kind+(item.step===null?'':' · step '+item.step)));const p=item.payload;if(item.kind==='text')native.append(el('p',p.text));else if(item.kind==='table'){const table=el('table'),head=el('tr');for(const c of p.columns||[])head.append(el('th',typeof c==='string'?c:c.name));table.append(head);for(const row of p.rows||[]){const tr=el('tr');for(const v of row)tr.append(el('td',typeof v==='object'?JSON.stringify(v):String(v??'')));table.append(tr)}native.append(table)}else if(item.kind==='confusion_matrix'){const table=el('table'),head=el('tr','');head.append(el('th','Actual / predicted'));for(const l of p.labels||[])head.append(el('th',l.label||String(l)));table.append(head);(p.counts||[]).forEach((row,i)=>{const tr=el('tr');tr.append(el('th',p.labels?.[i]?.label||String(i)));for(const v of row){const cell=el('td',String(v));cell.style.background='rgba(20,102,90,'+(v/Math.max(1,...p.counts.flat())*.25)+')';tr.append(cell)}table.append(tr)});native.append(table)}else if(item.kind==='histogram'){const svg=svgEl('svg',{viewBox:'0 0 600 180',class:'plot'}),counts=p.counts||[],max=Math.max(1,...counts);counts.forEach((v,i)=>{const bar=svgEl('rect',{x:40+i*540/counts.length,y:155-v/max*135,width:Math.max(1,540/counts.length-2),height:v/max*135,fill:'#4c9182'}),t=svgEl('title');t.textContent=`[${p.edges[i]}, ${p.edges[i+1]}]: ${v}`;bar.append(t);svg.append(bar)});native.append(svg)}else if(item.kind==='curve'){for(const [label,x,y] of [['ROC · false positive rate → true positive rate',p.fpr||[],p.tpr||[]],['Precision–recall · recall → precision',p.recall||[],p.precision||[]]]){native.append(el('h3',label));plot(native,[{meta:{run_id:item.name,label,metric:item.name},columns:{x,value:y,value_state:y.map((v,i)=>v===null||x[i]===null?'missing':'finite')}}],'curve',0)}}else if(item.kind==='media'&&p.artifact_id){const link=el('a','Open media');link.href='/api/v1/artifacts/'+encodeURIComponent(p.artifact_id)+'/content';link.target='_blank';link.rel='noopener';native.append(link)}const raw=el('details'),summary=el('summary','Inspect payload');raw.append(summary,jsonBlock(p));native.append(raw)}
-function queryEditor(){const c=$('#content');c.append(el('p','The same bounded public read API drives the curves. Source data remains read-only.','muted'));const editor=el('textarea');editor.value=JSON.stringify(querySpec([{name:series[0]?.name||'train/loss',context:{}}]),null,2);editor.setAttribute('aria-label','Query JSON');const run=el('button','Run query'),output=el('div');run.style.margin='12px 0';run.onclick=async()=>{try{clearError();const result=await api('/projects/'+project+'/query',{method:'POST',body:JSON.stringify(JSON.parse(editor.value)),signal:controller.signal});output.replaceChildren(jsonBlock(result));if(result.page.next_cursor){const next=el('button','Next page');next.onclick=()=>{const value=JSON.parse(editor.value);value.page={...value.page,cursor:result.page.next_cursor};editor.value=JSON.stringify(value,null,2);run.click()};output.append(next)}}catch(e){error(e)}};c.append(editor,run,output)}
-async function storage(){const s=await api('/local/status',{signal:controller.signal}),c=$('#content'),stats=el('div',undefined,'stats');for(const [label,value] of [['Retained events',s.history_events],['Pending uploads',s.pending_events],['Acknowledged',s.acked_events],['History bytes',readable(s.history_bytes)],['Media bytes',readable(s.media_bytes)]]){const card=el('div',undefined,'stat');card.append(el('small',label),el('b',String(value)));stats.append(card)}c.append(stats,el('p','record retains history after ACK. cache may have incomplete local coverage. sync=off creates no pending upload references.','muted'),jsonBlock(s.runs),el('p','Resume uploads from the terminal:'),el('pre','mlboard sync <logdir> --server http://127.0.0.1:8080'))}
+async function detail(gen){
+  const content=$('#content');
+  for(const rid of selected){
+    const section=el('section',undefined,'card');section.style.marginTop='16px';section.append(el('h3',runName(rid)));content.append(section);
+    if(view==='config'){
+      const run=await api('/runs/'+rid,{signal:controller.signal});if(gen!==generation)return;
+      const sessions=await api('/runs/'+rid+'/sessions',{signal:controller.signal});if(gen!==generation)return;
+      section.append(ui('small','detail.config'),jsonBlock(run.config),ui('small','detail.summary'),summaryTable(run.summary),ui('small','detail.source'),jsonBlock({run_id:run.id,state:run.state,retention:run.retention,sync:run.pending_mode?'background':'off',dropped:run.dropped,last_error:run.last_error}),jsonBlock(sessions));
+    }else if(view==='files'){
+      const response=await api('/runs/'+rid+'/artifacts',{signal:controller.signal});if(gen!==generation)return;
+      for(const file of response.artifacts){
+        const paragraph=el('p'),link=el('a',file.name);link.href='/api/v1/artifacts/'+encodeURIComponent(file.id)+'/content';link.target='_blank';link.rel='noopener';
+        paragraph.append(link,bind(el('span'),()=> ' · '+readable(file.size)+' · '+file.kind));section.append(paragraph);
+      }
+      if(!response.artifacts.length)section.append(ui('p','empty.files',{},'muted'));
+    }else{
+      const kind=view==='logs'?'logs':'records';let cursor=null,count=0;
+      const more=ui('button','action.loadMore',{},'pagination');
+      const load=async()=>{
+        more.disabled=true;
+        try{
+          const query=cursor?'?cursor='+encodeURIComponent(cursor):'';
+          const response=await api('/runs/'+rid+'/'+kind+query,{signal:controller.signal});if(gen!==generation)return;
+          for(const item of response[kind]){
+            if(kind==='logs')section.insertBefore(el('pre',item.time+'  '+item.level.toUpperCase()+'  '+item.message),more);
+            else renderRecord(section,item,more);
+          }
+          count+=response[kind].length;cursor=response.next_cursor;more.hidden=!cursor;
+          if(!count)section.insertBefore(ui('p','empty.'+kind,{},'muted'),more);
+        }finally{more.disabled=false}
+      };
+      more.onclick=()=>load().catch(e=>{if(e.name!=='AbortError')error(e)});section.append(more);await load();
+    }
+  }
+}
+function renderRecord(parent,item,before=null){
+  const native=el('div',undefined,'native');parent.insertBefore(native,before);
+  const heading=el('h3',item.name+' · ');
+  heading.append(local.messages.en['kind.'+item.kind]?ui('span','kind.'+item.kind):el('span',item.kind));
+  if(item.step!==null&&item.step!==undefined)heading.append(document.createTextNode(' · '),ui('span','record.step',{step:item.step}));
+  native.append(heading);const payload=item.payload;
+  if(item.kind==='text')native.append(el('p',payload.text));
+  else if(item.kind==='table'){
+    const table=el('table'),head=el('tr');
+    for(const column of payload.columns||[])head.append(el('th',typeof column==='string'?column:column.name));table.append(head);
+    for(const row of payload.rows||[]){const tr=el('tr');for(const value of row)tr.append(el('td',typeof value==='object'?JSON.stringify(value):String(value??'')));table.append(tr)}
+    native.append(table);
+  }else if(item.kind==='confusion_matrix'){
+    const table=el('table'),head=el('tr');head.append(ui('th','record.confusionHeader'));
+    for(const label of payload.labels||[])head.append(el('th',label.label||String(label)));table.append(head);
+    const maximum=Math.max(1,...payload.counts.flat());
+    (payload.counts||[]).forEach((row,index)=>{
+      const tr=el('tr');tr.append(el('th',payload.labels?.[index]?.label||String(index)));
+      for(const value of row){const cell=el('td',String(value));cell.style.background='rgba(var(--heatmap-rgb),'+(value/maximum*.25)+')';tr.append(cell)}table.append(tr);
+    });native.append(table);
+  }else if(item.kind==='histogram'){
+    const svg=svgEl('svg',{viewBox:'0 0 600 180',class:'plot',role:'img'});bind(svg,'kind.histogram',{},'aria-label');
+    const counts=payload.counts||[],maximum=Math.max(1,...counts);
+    counts.forEach((value,index)=>{
+      const bar=svgEl('rect',{x:40+index*540/counts.length,y:155-value/maximum*135,width:Math.max(1,540/counts.length-2),height:value/maximum*135,fill:'var(--histogram)'}),title=svgEl('title');
+      title.textContent=`[${payload.edges[index]}, ${payload.edges[index+1]}]: ${value}`;bar.append(title);svg.append(bar);
+    });native.append(svg);
+  }else if(item.kind==='curve'){
+    for(const [labelKey,x,y] of [['record.roc',payload.fpr||[],payload.tpr||[]],['record.pr',payload.recall||[],payload.precision||[]]]){
+      native.append(ui('h3',labelKey));
+      plot(native,[{meta:{run_id:item.name,labelKey,metric:item.name},columns:{x,value:y,value_state:y.map((value,index)=>value===null||x[index]===null?'missing':'finite')}}],'curve',0);
+    }
+  }else if(item.kind==='media'&&payload.artifact_id){
+    const link=ui('a','action.openMedia');link.href='/api/v1/artifacts/'+encodeURIComponent(payload.artifact_id)+'/content';link.target='_blank';link.rel='noopener';native.append(link);
+  }
+  const raw=el('details');raw.append(ui('summary','action.inspectPayload'),jsonBlock(payload));native.append(raw);
+}
+function queryEditor(){
+  const content=$('#content'),gen=generation;content.append(ui('p','query.description',{},'muted'));
+  const editor=el('textarea');editor.value=JSON.stringify(querySpec([series[0]||{name:'train/loss',context:{}}]),null,2);bind(editor,'query.json',{},'aria-label');
+  const run=ui('button','action.runQuery'),output=el('div');run.style.margin='12px 0';
+  run.onclick=async()=>{
+    run.disabled=true;
+    try{
+      clearError();const result=await api('/projects/'+project+'/query',{method:'POST',body:JSON.stringify(JSON.parse(editor.value)),signal:controller.signal});if(gen!==generation)return;output.replaceChildren(jsonBlock(result));
+      if(result.page.next_cursor){
+        const next=ui('button','action.nextPage');next.onclick=()=>{try{const value=JSON.parse(editor.value);value.page={...value.page,cursor:result.page.next_cursor};editor.value=JSON.stringify(value,null,2);run.click()}catch(e){error(e)}};output.append(next);
+      }
+    }catch(e){
+      if(e.name!=='AbortError'&&gen===generation){error(e);output.replaceChildren(jsonBlock(e.protocol||{error:{code:e.code||e.name,message:e.message}}))}
+    }finally{run.disabled=false;pruneBindings()}
+  };
+  content.append(editor,run,output);
+}
+async function storage(){
+  const status=await api('/local/status',{signal:controller.signal}),content=$('#content'),stats=el('div',undefined,'stats');
+  for(const [key,value,bytes] of [['events',status.history_events],['pending',status.pending_events],['acked',status.acked_events],['historyBytes',status.history_bytes,true],['mediaBytes',status.media_bytes,true]]){
+    const card=el('div',undefined,'stat');card.append(ui('small','storage.'+key),bind(el('b'),()=>bytes?readable(value):formatNumber(value)));stats.append(card);
+  }
+  content.append(stats,ui('p','storage.retention',{},'muted'),jsonBlock(status.runs),ui('p','storage.resume'),el('pre','mlboard sync <logdir> --server http://127.0.0.1:8080'));
+}
+function repaintPlots(resizeOnly=false){
+  prunePlots();
+  for(const [node,state] of plotViews){
+    if(resizeOnly&&state.width===node.clientWidth)continue;
+    paintPlot(node,state.frames,state.axis,state.smoothing);state.width=node.clientWidth;
+  }
+  pruneBindings();
+}
+for(const [id,key,attribute] of [['experimentsHeading','experiments.heading'],['project','experiments.project','aria-label'],['search','experiments.search','placeholder'],['search','experiments.search','aria-label'],['moreRuns','action.loadMore'],['languageLabel','settings.language'],['themeLabel','settings.theme']])bind($('#'+id),key,{},attribute);
+for(const option of $('#theme').options)bind(option,'theme.'+option.value);
+function applyPreferences(state){
+  document.documentElement.lang=state.language;document.documentElement.dataset.theme=state.resolvedTheme;document.title=t('page.title');
+  $('#language').value=state.language;$('#theme').value=state.theme;updateBindings();selectedLabel();chartStatus();
+  if(activeError)$('#error').textContent=local.errorText(language(),activeError);
+  repaintPlots();
+}
+preferences.subscribe(applyPreferences);applyPreferences(preferences.snapshot());
+$('#language').onchange=()=>preferences.setLanguage($('#language').value);
+$('#theme').onchange=()=>preferences.setTheme($('#theme').value);
 $('#experimentsToggle').onclick=()=>{const button=$('#experimentsToggle'),expanded=button.getAttribute('aria-expanded')!=='true';button.setAttribute('aria-expanded',String(expanded));$('#experiments').classList.toggle('expanded',expanded)};
 $('#project').onchange=async()=>{project=$('#project').value;cache.clear();await loadRuns();render()};let searchTimer;$('#search').oninput=()=>{clearTimeout(searchTimer);searchTimer=setTimeout(async()=>{try{await loadRuns();render()}catch(e){error(e)}},220)};$('#moreRuns').onclick=()=>loadRuns(true).catch(error);
 let resizeTimer;
 window.addEventListener('resize',()=>{
   clearTimeout(resizeTimer);
-  resizeTimer=setTimeout(()=>{
-    prunePlots();
-    for(const [node,state] of plotViews){
-      if(state.width===node.clientWidth)continue;
-      paintPlot(node,state.frames,state.axis,state.smoothing);state.width=node.clientWidth;
-    }
-  },80);
+  resizeTimer=setTimeout(()=>repaintPlots(true),80);
 });
 setInterval(()=>{if(document.hidden||chartQueue.active||chartQueue.pending)return;if(view==='workspace')drawVisible(generation,true)},5000);boot();
 </script></html>

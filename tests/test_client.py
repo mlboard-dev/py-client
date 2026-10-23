@@ -361,6 +361,17 @@ class ViewerTests(TempCase):
         base=f'http://127.0.0.1:{server.server_port}'
         auth={'Authorization':'Bearer '+server.access_token}
         try:
+            for path,mime in (('/assets/local-preferences.js','application/javascript'),('/assets/viewer.css','text/css')):
+                with urllib.request.urlopen(base+path) as asset:
+                    self.assertEqual(asset.headers.get_content_type(),mime)
+                    self.assertEqual(asset.headers['X-Content-Type-Options'],'nosniff')
+                    self.assertGreater(len(asset.read()),100)
+                with self.assertRaises(urllib.error.HTTPError) as exc:
+                    urllib.request.urlopen(urllib.request.Request(base+path,headers={'Host':'evil.example'}))
+                self.assertEqual(exc.exception.code,403);exc.exception.close()
+            with self.assertRaises(urllib.error.HTTPError) as exc:
+                urllib.request.urlopen(urllib.request.Request(base+'/assets/..%2fsdk.py',headers=auth))
+            self.assertEqual(exc.exception.code,404);exc.exception.close()
             with self.assertRaises(urllib.error.HTTPError) as exc: urllib.request.urlopen(base+'/api/v1/projects')
             self.assertEqual(exc.exception.code,401);exc.exception.close()
             for headers in ({**auth,'Host':'evil.example'},{**auth,'Origin':'https://evil.example'}):

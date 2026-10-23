@@ -19,4 +19,4 @@ tensorboard = ["tensorboard==2.20.0"]
 mlboard = "mlboard.cli:main"
 
 [tool.setuptools.package-data]
-mlboard = ["static/*.html"]
+mlboard = ["static/*.html", "static/*.js", "static/*.css"]

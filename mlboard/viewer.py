@@ -146,6 +146,13 @@ class Handler(BaseHTTPRequestHandler):
             self._headers(200,mime="text/html; charset=utf-8",length=len(body))
             self.wfile.write(body)
             return
+        assets = {"/assets/local-preferences.js":("local-preferences.js","application/javascript; charset=utf-8"),"/assets/viewer.css":("viewer.css","text/css; charset=utf-8")}
+        if method=="GET" and path in assets:
+            filename,mime = assets[path]
+            body = (Path(__file__).parent/"static"/filename).read_bytes()
+            self._headers(200,mime=mime,length=len(body))
+            self.wfile.write(body)
+            return
         bearer = self._auth()
         if method=="POST" and path=="/api/local/session":
             if not bearer:
