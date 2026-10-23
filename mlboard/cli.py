@@ -12,14 +12,17 @@ import time
 
 from .ipc import command
 from .store import readonly
-from .validation import dumps, normalize_server
+from .validation import dumps, normalize_server, text
 
 
-def sync(root, *, server="http://127.0.0.1:8080", api_key=None, project=None, create_project=False, timeout=30):
+def sync(root, *, server="http://127.0.0.1:8080", api_key=None, project=None, create_project=False, organization=None, timeout=30):
     if type(timeout) not in (int,float) or not math.isfinite(timeout) or timeout<=0:
         raise ValueError("timeout must be finite and positive")
+    organization = organization if organization is not None else os.environ.get("MLBOARD_ORGANIZATION")
+    if organization is not None and not text(organization,"organization",256):
+        raise ValueError("organization must be a nonempty ID or slug")
     deadline = time.monotonic()+timeout
-    reply = command(root,{"kind":"sync","server":normalize_server(server),"api_key":api_key or os.environ.get("MLBOARD_API_KEY"),"project":project,"create_project":create_project},timeout=min(timeout,10))
+    reply = command(root,{"kind":"sync","server":normalize_server(server),"api_key":api_key or os.environ.get("MLBOARD_API_KEY"),"project":project,"create_project":create_project,"organization":organization},timeout=min(timeout,10))
     target = reply.get("sync_target",1)
     status = reply["status"]
     while time.monotonic()<deadline:
@@ -41,6 +44,7 @@ def main(argv=None):
     p.add_argument("--server",default=os.environ.get("MLBOARD_SERVER","http://127.0.0.1:8080"))
     p.add_argument("--project",help="select local project name/ID")
     p.add_argument("--create-project",action="store_true",help="explicitly allow project creation (requires global projects:write)")
+    p.add_argument("--organization",help="organization ID/slug for project creation (default MLBOARD_ORGANIZATION)")
     p.add_argument("--timeout",type=float,default=30)
     p = sub.add_parser("serve",help="start authenticated local read-only viewer")
     p.add_argument("--logdir",required=True)
@@ -63,7 +67,7 @@ def main(argv=None):
         if args.command=="sync":
             if args.timeout<=0:
                 raise ValueError("timeout must be positive")
-            result = sync(args.logdir,server=args.server,project=args.project,create_project=args.create_project,timeout=args.timeout)
+            result = sync(args.logdir,server=args.server,project=args.project,create_project=args.create_project,organization=args.organization,timeout=args.timeout)
             print(dumps(result))
         elif args.command=="serve":
             from .viewer import serve

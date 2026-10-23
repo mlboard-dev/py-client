@@ -21,6 +21,7 @@ CREATE TABLE IF NOT EXISTS runs(
  id TEXT PRIMARY KEY, project TEXT NOT NULL, run_path TEXT NOT NULL, name TEXT NOT NULL,
  config TEXT NOT NULL, tags TEXT NOT NULL, state TEXT NOT NULL DEFAULT 'running', retention TEXT NOT NULL,
  created_at TEXT NOT NULL, updated_at TEXT NOT NULL, remote_server TEXT, remote_project TEXT,
+ organization TEXT, remote_organization TEXT,
  pending_mode INTEGER NOT NULL DEFAULT 0, last_error TEXT, dropped INTEGER NOT NULL DEFAULT 0,
  deletion_generation INTEGER NOT NULL DEFAULT 0, initial_body TEXT NOT NULL,
  history_events INTEGER NOT NULL DEFAULT 0, pending_events INTEGER NOT NULL DEFAULT 0,
@@ -124,6 +125,9 @@ class RunStore:
             for column,default in (("manifest_revision",0),("remote_manifest_revision",-1)):
                 if column not in columns:
                     self.db.execute(f"ALTER TABLE runs ADD COLUMN {column} INTEGER NOT NULL DEFAULT {default}")
+            for column in ("organization","remote_organization"):
+                if column not in columns:
+                    self.db.execute(f"ALTER TABLE runs ADD COLUMN {column} TEXT")
             if "pending_mode" not in {r[1] for r in self.db.execute("PRAGMA table_info(producers)")}:
                 self.db.execute("ALTER TABLE producers ADD COLUMN pending_mode INTEGER NOT NULL DEFAULT 0")
                 self.db.execute("UPDATE producers SET pending_mode=(SELECT pending_mode FROM runs WHERE id=producers.run_id)")
@@ -151,10 +155,13 @@ class RunStore:
             raise ValueError("run_id already belongs to another project/path")
         if not old:
             t = now()
-            self.db.execute("INSERT INTO runs(id,project,run_path,name,config,tags,retention,created_at,updated_at,pending_mode,initial_body) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
-                            (rid,m["project"],m["run_path"],m["name"],dumps(m["config"]),dumps(m["tags"]),m["retention"],t,t,int(m["sync"] == "background"),body))
+            self.db.execute("INSERT INTO runs(id,project,run_path,name,config,tags,retention,created_at,updated_at,pending_mode,initial_body,organization) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+                            (rid,m["project"],m["run_path"],m["name"],dumps(m["config"]),dumps(m["tags"]),m["retention"],t,t,int(m["sync"] == "background"),body,m.get("organization")))
         elif old["retention"] != m["retention"]:
             raise ValueError("cannot change existing run retention")
+        # Once resolved, preserve the selector that established the stable binding.
+        if old and old["organization"] is None and old["remote_organization"] is None and m.get("organization") is not None:
+            self.db.execute("UPDATE runs SET organization=? WHERE id=?",(m["organization"],rid))
         session = self.db.execute("SELECT * FROM sessions WHERE id=?", (m["session_id"],)).fetchone()
         if not session:
             maximum = self.db.execute("SELECT COALESCE(MAX(ordinal),-1) FROM sessions WHERE run_id=?", (rid,)).fetchone()[0]
@@ -247,7 +254,7 @@ class RunStore:
     def finish(self, rid, state, dropped):
         self.db.execute("UPDATE runs SET manifest_revision=manifest_revision+CASE WHEN state<>? THEN 1 ELSE 0 END,state=?,dropped=MAX(dropped,?),updated_at=? WHERE id=?", (state,state,dropped,now(),rid))
 
-    def mark_sync(self, *, server, project=None, run_id=None):
+    def mark_sync(self, *, server, project=None, run_id=None, force_remote_check=False):
         server=normalize_server(server)
         clause,args = (" WHERE id=?",(run_id,)) if run_id else (" WHERE project=?",(project,)) if project else ("",())
         rows = self.db.execute("SELECT id,remote_server,history_events,acked_events,pending_events FROM runs"+clause,args).fetchall()
@@ -260,6 +267,9 @@ class RunStore:
             self.db.execute("UPDATE runs SET pending_events=pending_events+? WHERE id=?",(count,r["id"]))
             self.db.execute("UPDATE store_stats SET pending_events=pending_events+? WHERE singleton=1",(count,))
             self.db.execute("UPDATE runs SET pending_mode=1,remote_server=? WHERE id=?", (server,r["id"]))
+            if force_remote_check:
+                # Older in-flight results must not satisfy this explicit check.
+                self.db.execute("UPDATE runs SET manifest_revision=manifest_revision+1 WHERE id=?",(r["id"],))
         return len(rows)
 
     def apply_sync_result(self, result):
@@ -270,6 +280,8 @@ class RunStore:
             self.db.execute("UPDATE runs SET last_error=NULL WHERE id=?",(rid,))
         if result.get("project_id"):
             self.db.execute("UPDATE runs SET remote_server=?,remote_project=? WHERE id=?",(result["server"],result["project_id"],rid))
+        if result.get("organization_id"):
+            self.db.execute("UPDATE runs SET remote_organization=? WHERE id=?",(result["organization_id"],rid))
         if not result.get("error") and "manifest_revision" in result:
             self.db.execute("UPDATE runs SET remote_manifest_revision=MAX(remote_manifest_revision,?) WHERE id=?",(result["manifest_revision"],rid))
         for aid in result.get("media",[]):

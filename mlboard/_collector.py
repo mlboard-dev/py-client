@@ -206,8 +206,8 @@ def serve(root, *, idle_timeout=30):
                                     reply["session_ordinal"] = str(ordinal)
                                     if message["sync"] == "background":
                                         server = message.get("server") or "http://127.0.0.1:8080"
-                                        store.mark_sync(server=server,run_id=message["run_id"])
-                                        configs[message["run_id"]] = {"server":server,"api_key":message.get("api_key"),"create_project":message.get("create_project",False)}
+                                        store.mark_sync(server=server,run_id=message["run_id"],force_remote_check=message.get("organization") is not None)
+                                        configs[message["run_id"]] = {"server":server,"api_key":message.get("api_key"),"create_project":message.get("create_project",False),"organization":message.get("organization")}
                                 elif kind == "event":
                                     if client.get("run_id") != message["event"]["run_id"]:
                                         raise ValueError("register run first")
@@ -239,8 +239,8 @@ def serve(root, *, idle_timeout=30):
                                     pass
                                 elif kind == "sync":
                                     server = message.get("server") or "http://127.0.0.1:8080"
-                                    count = store.mark_sync(server=server,project=message.get("project"))
-                                    selected_config = {"server":server,"api_key":message.get("api_key"),"create_project":message.get("create_project",False),"timeout":message.get("http_timeout",4)}
+                                    count = store.mark_sync(server=server,project=message.get("project"),force_remote_check=message.get("organization") is not None)
+                                    selected_config = {"server":server,"api_key":message.get("api_key"),"create_project":message.get("create_project",False),"organization":message.get("organization"),"timeout":message.get("http_timeout",4)}
                                     selected = store.db.execute("SELECT id FROM runs WHERE pending_mode=1"+(" AND project=?" if message.get("project") else ""),(message["project"],) if message.get("project") else ()).fetchall()
                                     for row in selected:
                                         configs[row[0]] = dict(selected_config)
