@@ -191,6 +191,9 @@ def serve(root, *, idle_timeout=30):
                                     limit=min(256*1024**2,store.max_run_bytes-usage[0]-usage[1])
                                     media_jobs.put_nowait((sock,client,message,limit))
                                     client["media_pending"]=client.get("media_pending",0)+1
+                                except queue.Full:
+                                    reply.update(ok=False,error="media queue busy",retryable=True)
+                                    replies.append((sock,client,reply))
                                 except Exception as exc:
                                     reply.update(ok=False,error=f"media queue unavailable: {type(exc).__name__}")
                                     replies.append((sock,client,reply))

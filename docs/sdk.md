@@ -77,3 +77,7 @@ NaN/Inf 标量保存显式状态，JSON 中数值为 null；图表显示缺口�
 `run_id=existing_id` 为恢复训练创建新持久 session ordinal；同一 session/producer 不允许用新 token 从 seq 0 重新开始。DDP 可显式共享 run/session/ordinal/primary producer，各 rank 使用不同 producer ID。SDK 没有隐式 barrier、reduction 或跨进程协调。
 
 持久化、保留策略与故障处理见[存储与恢复](storage-and-recovery.md)；上传见[同步与 key](sync-and-keys.md)。
+
+### 连续媒体上报
+
+`log_media()` 仍只把元数据加入有界内存队列，文件读取和复制发生在 collector。collector 的媒体队列暂时繁忙时，发送线程保留原事件身份并每 100 ms 重试；不会把背压计为永久丢失。`finish()` 在已接受的事件和媒体收到持久化确认后才发送结束命令。文件不存在、配额超限等永久错误仍显式报告。

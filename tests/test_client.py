@@ -154,6 +154,25 @@ class SDKTests(TempCase):
             self.assertEqual([r[0] for r in db.execute('SELECT ordinal FROM sessions ORDER BY ordinal')],[0,1])
             self.assertNotIn('elapsed_seconds',json.loads(db.execute('SELECT body FROM events ORDER BY revision DESC LIMIT 1').fetchone()[0]))
 
+    def test_media_burst_retries_backpressure_before_finishing(self):
+        source=self.root/'media.bin';source.write_bytes(b'x'*65536)
+        runs=[mlboard.init('vision',f'media/burst-{i}',spool_dir=self.root,mode='strict') for i in range(2)]
+        started=time.monotonic()
+        for run in runs:
+            for step in range(10):
+                self.assertTrue(run.log_media(f'files/{step}',source,step=step).accepted)
+                self.assertTrue(run.log({'loss':float(step)},step=step).accepted)
+        self.assertLess(time.monotonic()-started,1.0,'log_media must not wait for file copies')
+        for run in runs:
+            receipt=run.finish(timeout=12)
+            self.assertTrue(receipt.complete,receipt)
+            self.assertEqual(receipt.dropped,0)
+            self.assertEqual(run.status()['collector_rejected'],0)
+        with readonly(self.root) as db:
+            self.assertEqual(db.execute('SELECT COUNT(*) FROM media').fetchone()[0],20)
+            self.assertEqual(db.execute('SELECT COUNT(*) FROM events').fetchone()[0],40)
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM runs WHERE state='finished'").fetchone()[0],2)
+
     def test_media_is_snapshot_and_missing_file_is_explicit_failure(self):
         source=self.root/'input.txt';source.write_text('initial')
         run=mlboard.init('vision','media/run',spool_dir=self.root)

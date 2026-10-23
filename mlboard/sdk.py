@@ -365,6 +365,7 @@ class Run:
 
     def _sender(self):
         inflight = OrderedDict()
+        retry_at = {}
         sock = None
         output, incoming = bytearray(),bytearray()
         registered = False
@@ -379,11 +380,19 @@ class Run:
                         output.extend(b"".join(inflight.values()))
                         incoming = bytearray()
                         registered = False
+                        retry_at.clear()
                     except Exception as exc:
                         self._last_error = f"collector startup: {type(exc).__name__}"
                         self._wake.wait(0.2)
                         self._wake.clear()
                         continue
+                if registered:
+                    # Retry only unaccepted work, with a bounded IPC buffer and backoff.
+                    for key, deadline in list(retry_at.items()):
+                        if time.monotonic() >= deadline and len(output)<256*1024:
+                            if key in inflight:
+                                output.extend(inflight[key])
+                            retry_at.pop(key, None)
                 if registered and len(output)<256*1024 and len(inflight)<128 and sum(map(len,inflight.values()))<768*1024:
                     if self._lock.acquire(blocking=False):
                         try:
@@ -392,7 +401,7 @@ class Run:
                                 self._bytes -= len(data)
                                 inflight[key] = data
                                 output.extend(data)
-                            if self._finished and not self._queue and self._finish_frame and "finish" not in inflight and not self._finish_ack.is_set():
+                            if self._finished and not self._queue and not inflight and self._finish_frame and "finish" not in inflight and not self._finish_ack.is_set():
                                 inflight["finish"] = self._finish_frame
                                 output.extend(self._finish_frame)
                         finally:
@@ -413,6 +422,9 @@ class Run:
                         for reply in extract(incoming):
                             key = reply.get("id")
                             if not reply.get("ok"):
+                                if reply.get("retryable") and key in inflight:
+                                    retry_at[key] = time.monotonic()+0.1
+                                    continue
                                 self._last_error = reply.get("error","collector rejected message")
                                 if key in inflight:
                                     inflight.pop(key)
