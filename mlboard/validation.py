@@ -143,3 +143,20 @@ def normalize_server(value):
     if any(ord(c)<=32 or ord(c)==127 for c in urllib.parse.unquote(path)):
         raise ValidationError("invalid server base path")
     return scheme+'://'+host+suffix+path
+
+
+def context_key(value):
+    """JSON numeric identity treats 1 and 1.0 (and signed zero) equally.
+
+    Only derived indexes use this representation; immutable event bodies and
+    their acknowledged hashes are never rewritten.
+    """
+    def canonical(item):
+        if type(item) is float and item.is_integer():
+            return int(item)
+        if type(item) is dict:
+            return {k: canonical(v) for k, v in item.items()}
+        if type(item) is list:
+            return [canonical(v) for v in item]
+        return item
+    return dumps(canonical(value))

@@ -53,3 +53,10 @@ outputs/client-venv/bin/mlboard sync ./outputs/mlboard-runs --timeout 30
 诊断日志位于 `<logdir>/diagnostics/collector.log`，密钥不持久化到事件或诊断。collector endpoint 文件含本机 IPC 凭据，不应公开。
 
 不要把活跃 SQLite 主文件单独复制当作完整备份。SQLite 的 backup API 可生成数据库快照，但完整 RunStore 还需一致的不可变媒体。当前没有完整 RunStore 备份 CLI；需要目录副本时，先使训练达到本地完成、等待 collector 退出并确认无写入者，再连同 `media/` 保留整个目录。保留原 store，先在新目录验证恢复。
+
+
+### Schema 4 兼容修复
+
+Collector 打开旧库时将 `auxiliary` producer 迁移为 `worker`，重建数值 context 查询索引（`1.0` 和 `1` 相同），不修改已上传事件正文/hash。只读 viewer 对 Schema 3 使用兼容查询；下次 collector 打开后使用新索引。
+
+同步按独立尝试序号轮转，失败的前 128 个 run 不再挡住后续 run。媒体事务回滚后登记无引用文件回收；维护任务每轮最多检查 32 个文件，崩溃遗留文件超过一小时才清理，已提交附件受引用保护。

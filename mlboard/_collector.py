@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import sqlite3
 import fcntl
 import json
 import os
@@ -103,6 +104,9 @@ def serve(root, *, idle_timeout=30):
                         revision,duplicate=store.append(message["event"])
                     reply.update(seq=message["event"]["seq"],revision=str(revision),duplicate=duplicate,status=store.status(message["event"]["run_id"]))
                 except Exception as exc:
+                    if outcome.get("item"):
+                        with contextlib.suppress(sqlite3.Error, OSError):
+                            store.discard_unreferenced_media(outcome["item"])
                     reply.update(ok=False,error=f"media persist failed: {type(exc).__name__}: {str(exc)[:128]}")
                 media_replies.append((sock,client,reply))
                 deferred=client.pop("finish_deferred",None) if not client.get("media_pending") else None

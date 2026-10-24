@@ -55,13 +55,19 @@ def encode_cursor(parts):
 class ViewerServer(ThreadingHTTPServer):
     daemon_threads = True
     allow_reuse_address = False
-    def __init__(self, root, address=("127.0.0.1",8081), *, token=None):
+    def __init__(self, root, address=("127.0.0.1",8081), *, token=None, public_url=None):
         try:
             loopback = address[0]=="localhost" or ipaddress.ip_address(address[0]).is_loopback
         except ValueError:
             loopback = False
         if not loopback and not token:
             raise ValueError("non-loopback host requires explicit --token authentication")
+        public = urllib.parse.urlsplit(public_url) if public_url else None
+        if public and (public.scheme not in ("http","https") or not public.hostname or public.username
+                       or public.password or public.path not in ("", "/") or public.query or public.fragment):
+            raise ValueError("--public-url must be an HTTP(S) origin")
+        if address[0] in ("0.0.0.0","::","") and not public:
+            raise ValueError("wildcard bind requires --public-url, e.g. http://192.168.1.20:8081")
         self.root = Path(root).resolve()
         with readonly(self.root) as db:
             self.store_id = db.execute("SELECT value FROM meta WHERE key='store_id'").fetchone()[0]
@@ -70,7 +76,14 @@ class ViewerServer(ThreadingHTTPServer):
         self.queries = LocalQuery(self.root)
         super().__init__(address,Handler)
         host,port = self.server_address[:2]
+        host = f"[{host}]" if ":" in host else host
         self.allowed_hosts = {f"{host}:{port}",f"localhost:{port}",f"127.0.0.1:{port}"} if loopback else {f"{host}:{port}"}
+        if public:
+            self.allowed_hosts.add(public.netloc)
+        self.allowed_origins = {"http://"+h for h in self.allowed_hosts}
+        if public:
+            self.allowed_origins.add(public_url.rstrip("/"))
+        self.public_url = public_url.rstrip("/") if public else f"http://{host}:{port}"
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -103,7 +116,7 @@ class Handler(BaseHTTPRequestHandler):
         if self.headers.get("Host") not in self.server.allowed_hosts:
             raise QueryError("INVALID_HOST","untrusted Host",403)
         origin = self.headers.get("Origin")
-        if origin and origin not in {"http://"+h for h in self.server.allowed_hosts}:
+        if origin and origin not in self.server.allowed_origins:
             raise QueryError("INVALID_ORIGIN","cross-origin access is disabled",403)
         auth = self.headers.get("Authorization","")
         bearer = auth.startswith("Bearer ") and secrets.compare_digest(auth[7:],self.server.access_token)
@@ -296,9 +309,9 @@ class Handler(BaseHTTPRequestHandler):
         self._handle("DELETE")
 
 
-def serve(root, *, host="127.0.0.1", port=8081, token=None, open_browser=False):
-    server = ViewerServer(root,(host,port),token=token)
-    url = f"http://{host}:{server.server_port}/#token={server.access_token}"
+def serve(root, *, host="127.0.0.1", port=8081, token=None, open_browser=False, public_url=None):
+    server = ViewerServer(root,(host,port),token=token,public_url=public_url)
+    url = f"{server.public_url}/#token={server.access_token}"
     print("MLBoard local viewer (read-only source): " + url,flush=True)
     if open_browser:
         webbrowser.open(url)

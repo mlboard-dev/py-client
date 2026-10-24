@@ -51,6 +51,7 @@ def main(argv=None):
     p.add_argument("--host",default="127.0.0.1")
     p.add_argument("--port",type=int,default=8081)
     p.add_argument("--token",help="explicit local authentication token, required for non-loopback bind")
+    p.add_argument("--public-url",help="trusted access origin; required with --host 0.0.0.0")
     p.add_argument("--open",action="store_true")
     p = sub.add_parser("status",help="inspect retained history, pending uploads and errors")
     p.add_argument("logdir")
@@ -71,7 +72,7 @@ def main(argv=None):
             print(dumps(result))
         elif args.command=="serve":
             from .viewer import serve
-            serve(args.logdir,host=args.host,port=args.port,token=args.token,open_browser=args.open)
+            serve(args.logdir,host=args.host,port=args.port,token=args.token,open_browser=args.open,public_url=args.public_url)
         elif args.command=="status":
             with readonly(args.logdir) as db:
                 counts = dict(db.execute("SELECT history_events,pending_events,acked_events,history_bytes,media_bytes FROM store_stats WHERE singleton=1").fetchone())

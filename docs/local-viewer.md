@@ -45,3 +45,15 @@ X 轴支持 step/epoch/wall_time/elapsed_seconds/session_elapsed_seconds/process
 分类选择中，两个字段都省略表示不限分类；显式 `path_prefixes:[]` 不选分类组，`include_ungrouped:true` 只额外选根级 run。prefix 只匹配后代，排除同名根 run。目录 GET 的 `path_prefix=` 表示根级。summary 的 key 为 canonical JSON `[name,context]`，value 同时含 name/context。
 
 读取使用 `mode=ro`、`query_only` 和短事务，不跨浏览器分页持有源事务。当前没有百万点多分辨率索引；选择较小数据范围，超过预算会报错，不伪造完整结果。
+
+
+### 局域网访问
+
+监听所有网卡时必须指定实际访问地址及 token，例如：
+
+```sh
+mlboard serve --logdir ./outputs/runs --host 0.0.0.0 --port 8081 \
+  --public-url http://192.168.1.42:8081 --token "$LOCAL_VIEWER_TOKEN"
+```
+
+`--host` 只指定监听网卡；`--public-url` 决定允许的 Host/Origin 和打印的访问链接。其他 Host 仍拒绝。外部访问应使用可信网络或 HTTPS 反向代理。

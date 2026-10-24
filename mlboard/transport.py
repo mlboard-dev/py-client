@@ -155,7 +155,7 @@ def sync_pass(root, config):
             config={**config,"server":normalize_server(config["server"])}
             selection="remote_server=?"
             args=(config["server"],)
-        runs=[dict(r) for r in db.execute("SELECT * FROM runs WHERE pending_mode=1 AND (pending_events>0 OR remote_manifest_revision<manifest_revision) AND "+selection+" ORDER BY updated_at LIMIT 128",args)]
+        runs=[dict(r) for r in db.execute("SELECT * FROM runs WHERE pending_mode=1 AND (pending_events>0 OR remote_manifest_revision<manifest_revision) AND "+selection+" ORDER BY sync_attempt,updated_at,id LIMIT 128",args)]
         results = []
         for run in runs:
             rid = run["id"]
@@ -210,7 +210,7 @@ def sync_pass(root, config):
                     http.request("POST",f"/runs/{rid}/sessions",{"session_id":sid,"ordinal":str(session["ordinal"]),"primary_producer":session["primary_producer"]})
                     producers = [dict(p) for p in db.execute("SELECT * FROM producers WHERE run_id=? AND session_id=?",(rid,sid))]
                     for producer in producers:
-                        http.request("POST",f"/runs/{rid}/sessions/{sid}/producers",{"producer_id":producer["id"],"role":producer["role"]})
+                        http.request("POST",f"/runs/{rid}/sessions/{sid}/producers",{"producer_id":producer["id"],"role":"worker" if producer["role"]=="auxiliary" else producer["role"]})
                 rows = [dict(r) for r in db.execute("SELECT e.body FROM events e WHERE e.run_id=? AND e.pending=1 AND NOT EXISTS(SELECT 1 FROM media_refs ref JOIN media m ON m.id=ref.artifact_id WHERE ref.event_revision=e.revision AND m.uploaded=0) ORDER BY e.revision LIMIT 512",(rid,))]
                 batch, length = [], 0
                 for row in rows:

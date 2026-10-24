@@ -12,9 +12,9 @@ import sqlite3
 import time
 import uuid
 
-from .validation import dumps, digest, now, normalize_server
+from .validation import dumps, digest, now, normalize_server, context_key
 
-SCHEMA = 3
+SCHEMA = 4
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY, value TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS runs(
@@ -90,9 +90,12 @@ def readonly(root):
     db.execute("PRAGMA query_only=ON")
     db.execute("PRAGMA busy_timeout=50")
     schema = db.execute("SELECT value FROM meta WHERE key='schema_version'").fetchone()
-    if not schema or int(schema[0]) != SCHEMA:
+    if not schema or int(schema[0]) not in (3, SCHEMA):
         db.close()
         raise ValueError("unsupported MLBoard RunStore schema")
+    db.legacy_context_index = int(schema[0]) < 4
+    if db.legacy_context_index:
+        db.create_function("mlboard_context_key",1,lambda raw: context_key(json.loads(raw)),deterministic=True)
     return db
 
 
@@ -138,13 +141,29 @@ class RunStore:
                 self.db.execute("UPDATE runs SET history_events=(SELECT COUNT(*) FROM events WHERE run_id=runs.id),pending_events=(SELECT COALESCE(SUM(pending),0) FROM events WHERE run_id=runs.id),acked_events=(SELECT COALESCE(SUM(acked),0) FROM events WHERE run_id=runs.id),history_bytes=(SELECT COALESCE(SUM(length(CAST(body AS BLOB))),0) FROM events WHERE run_id=runs.id),media_bytes=(SELECT COALESCE(SUM(size),0) FROM media WHERE run_id=runs.id)")
                 self.db.execute("UPDATE store_stats SET history_events=(SELECT COALESCE(SUM(history_events),0) FROM runs),pending_events=(SELECT COALESCE(SUM(pending_events),0) FROM runs),acked_events=(SELECT COALESCE(SUM(acked_events),0) FROM runs),history_bytes=(SELECT COALESCE(SUM(history_bytes),0) FROM runs),media_bytes=(SELECT COALESCE(SUM(media_bytes),0) FROM runs) WHERE singleton=1")
         with self.db:
-            self.db.execute("INSERT INTO meta VALUES('schema_version',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (str(SCHEMA),))
             self.db.execute("INSERT OR IGNORE INTO meta VALUES('store_id',?)", (str(uuid.uuid4()),))
+        with self.db:
+            self.db.execute("UPDATE producers SET role='worker' WHERE role='auxiliary'")
+            if "sync_attempt" not in {r[1] for r in self.db.execute("PRAGMA table_info(runs)")}:
+                self.db.execute("ALTER TABLE runs ADD COLUMN sync_attempt INTEGER NOT NULL DEFAULT 0")
+            self.db.execute("INSERT OR IGNORE INTO meta VALUES('sync_clock','0')")
+            for table in ("scalars", "records"):
+                if "context_key" not in {r[1] for r in self.db.execute(f"PRAGMA table_info({table})")}:
+                    self.db.execute(f"ALTER TABLE {table} ADD COLUMN context_key TEXT NOT NULL DEFAULT '{{}}'")
+                    rows = self.db.execute(f"SELECT rowid,context FROM {table}")
+                    while batch := rows.fetchmany(512):
+                        self.db.executemany(f"UPDATE {table} SET context_key=? WHERE rowid=?",
+                                            [(context_key(json.loads(row[1])),row[0]) for row in batch])
+                self.db.execute(f"CREATE INDEX IF NOT EXISTS {table}_context_identity ON {table}(run_id,name,context_key,event_revision)")
+            self.db.execute("INSERT INTO meta VALUES('schema_version',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (str(SCHEMA),))
+        self._orphan_scan = None
         self.store_id = self.db.execute("SELECT value FROM meta WHERE key='store_id'").fetchone()[0]
 
     def close(self):
         with contextlib.suppress(sqlite3.Error):
             self.db.execute("PRAGMA wal_checkpoint(PASSIVE)")
+        if self._orphan_scan is not None:
+            self._orphan_scan.close()
         self.db.close()
 
     def register(self, m):
@@ -173,7 +192,7 @@ class RunStore:
         producer = self.db.execute("SELECT token FROM producers WHERE run_id=? AND session_id=? AND id=?", (rid,m["session_id"],m["producer_id"])).fetchone()
         if producer and producer[0] != m["token"]:
             raise ValueError("producer already exists: start a new session or producer incarnation")
-        self.db.execute("INSERT OR IGNORE INTO producers VALUES(?,?,?,?,?,?)", (rid,m["session_id"],m["producer_id"],m["token"],"primary" if m["producer_id"] == m["primary_producer"] else "auxiliary",int(m["sync"]=="background")))
+        self.db.execute("INSERT OR IGNORE INTO producers VALUES(?,?,?,?,?,?)", (rid,m["session_id"],m["producer_id"],m["token"],"primary" if m["producer_id"] == m["primary_producer"] else "worker",int(m["sync"]=="background")))
         if not session or not producer:
             self.db.execute("UPDATE runs SET state='running',updated_at=?,manifest_revision=manifest_revision+1 WHERE id=?", (now(),rid))
         return self.db.execute("SELECT ordinal FROM sessions WHERE id=?", (m["session_id"],)).fetchone()[0]
@@ -220,14 +239,14 @@ class RunStore:
         rev = cur.lastrowid
         step = int(event["step"]) if "step" in event else None
         for metric in (f for f in event.get("fields", []) if f["kind"] == "scalar"):
-            self.db.execute("INSERT INTO scalars VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", (rev,identity[0],metric["name"],dumps(metric.get("context",{})),step,event.get("epoch"),event.get("elapsed_seconds"),event.get("session_elapsed_seconds"),event["event_time"],metric["value"],metric.get("value_state","finite"),identity[1],identity[2],identity[3],session[0],int(event["processed_samples"]) if "processed_samples" in event else None))
+            self.db.execute("INSERT INTO scalars VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", (rev,identity[0],metric["name"],dumps(metric.get("context",{})),step,event.get("epoch"),event.get("elapsed_seconds"),event.get("session_elapsed_seconds"),event["event_time"],metric["value"],metric.get("value_state","finite"),identity[1],identity[2],identity[3],session[0],int(event["processed_samples"]) if "processed_samples" in event else None,context_key(metric.get("context",{}))))
         for record in (f for f in event.get("fields", []) if f["kind"] != "scalar"):
             if record["kind"]=="media":
                 aid = record["payload"].get("artifact_id")
                 if not self.db.execute("SELECT 1 FROM media WHERE id=? AND run_id=?",(aid,identity[0])).fetchone():
                     raise ValueError("media event references an unavailable artifact")
                 self.db.execute("INSERT INTO media_refs VALUES(?,?)",(aid,rev))
-            self.db.execute("INSERT INTO records VALUES(?,?,?,?,?,?,?)", (rev,identity[0],record["name"],record["kind"],dumps(record.get("context",{})),dumps(record["payload"]),step))
+            self.db.execute("INSERT INTO records VALUES(?,?,?,?,?,?,?,?)", (rev,identity[0],record["name"],record["kind"],dumps(record.get("context",{})),dumps(record["payload"]),step,context_key(record.get("context",{}))))
         for log in event.get("logs", []):
             self.db.execute("INSERT INTO logs VALUES(?,?,?,?,?)", (rev,identity[0],event["event_time"],log["level"],log["message"]))
         body_bytes = len(body.encode())
@@ -274,6 +293,8 @@ class RunStore:
 
     def apply_sync_result(self, result):
         rid = result["run_id"]
+        self.db.execute("UPDATE meta SET value=CAST(value AS INTEGER)+1 WHERE key='sync_clock'")
+        self.db.execute("UPDATE runs SET sync_attempt=(SELECT CAST(value AS INTEGER) FROM meta WHERE key='sync_clock') WHERE id=?",(rid,))
         if result.get("error"):
             self.db.execute("UPDATE runs SET last_error=? WHERE id=?",(result["error"][:1024],rid))
         else:
@@ -313,14 +334,33 @@ class RunStore:
                     self.db.execute("UPDATE runs SET media_bytes=media_bytes-? WHERE id=?",(item["size"],rid))
                     self.db.execute("UPDATE store_stats SET media_bytes=media_bytes-? WHERE singleton=1",(item["size"],))
 
+    def discard_unreferenced_media(self, item):
+        # Called after rollback, on the sole database writer. Protect retries
+        # whose artifact was already committed by a previous request.
+        with self.db:
+            if not self.db.execute("SELECT 1 FROM media WHERE path=?",(item["path"],)).fetchone():
+                self.db.execute("INSERT OR IGNORE INTO gc_files VALUES(?)",(item["path"],))
+
     def maintenance(self):
         """Bounded work only between write batches; never inside training."""
         with contextlib.suppress(sqlite3.Error):
             self.db.execute("PRAGMA wal_checkpoint(PASSIVE)")
+        # Reconcile crash leftovers incrementally; fresh files may still be in
+        # the media worker's completion queue and must not be collected.
+        if self._orphan_scan is None:
+            self._orphan_scan = os.scandir(self.root/"media")
+        for _ in range(32):
+            entry = next(self._orphan_scan, None)
+            if entry is None:
+                self._orphan_scan.close()
+                self._orphan_scan = None
+                break
+            if entry.is_file(follow_symlinks=False) and time.time()-entry.stat().st_mtime>3600:
+                self.discard_unreferenced_media({"path":str(Path("media")/entry.name)})
         files = self.db.execute("SELECT path FROM gc_files LIMIT 16").fetchall()
         for row in files:
             path = (self.root/row[0]).resolve()
-            if path.parent==self.root/"media":
+            if path.parent==self.root/"media" and not self.db.execute("SELECT 1 FROM media WHERE path=?",(row[0],)).fetchone():
                 with contextlib.suppress(FileNotFoundError):
                     path.unlink()
             with self.db:

@@ -13,7 +13,7 @@ import time
 import uuid
 
 from .store import readonly
-from .validation import MAX_INT, dumps
+from .validation import MAX_INT, dumps, context_key
 
 
 class QueryError(ValueError):
@@ -134,7 +134,7 @@ def validate_spec(spec):
             raise QueryError("INVALID_QUERY","metrics require name and object context")
         if any(type(v) not in (str,int,float,bool,type(None)) or (type(v) is float and not math.isfinite(v)) for v in metric.get("context",{}).values()):
             raise QueryError("INVALID_QUERY","metric context values must be finite primitive JSON")
-        identity=dumps([metric["name"],metric.get("context",{})])
+        identity=context_key([metric["name"],metric.get("context",{})])
         if identity in identities:
             raise QueryError("INVALID_QUERY","duplicate metric selection")
         identities.add(identity)
@@ -344,8 +344,9 @@ class LocalQuery:
                             continue
                         producers.append({"run_id":rid,"session_id":s["id"],"producer_id":p[0],"logical_stream":"primary" if producer["mode"]=="primary" else p[0]})
                 for metric in metrics:
-                    sql = "SELECT s.* FROM scalars s JOIN sessions t ON t.id=s.session_id WHERE s.run_id=? AND s.name=? AND s.context=? AND s.event_revision<=?"
-                    params = [rid,metric["name"],dumps(metric.get("context",{})),revision]
+                    identity_column = "mlboard_context_key(s.context)" if db.legacy_context_index else "s.context_key"
+                    sql = f"SELECT s.* FROM scalars s JOIN sessions t ON t.id=s.session_id WHERE s.run_id=? AND s.name=? AND {identity_column}=? AND s.event_revision<=?"
+                    params = [rid,metric["name"],context_key(metric.get("context",{})),revision]
                     if producer["mode"]=="primary":
                         sql += " AND s.producer_id=t.primary_producer"
                     else:
@@ -385,7 +386,7 @@ class LocalQuery:
                         row["x"] = str(x) if axis in ("step","processed_samples") else x
                         row["_x"] = sort_x
                         stream = "primary" if producer["mode"]=="primary" else row["producer_id"]
-                        series[(rid,metric["name"],dumps(metric.get("context",{})),stream)].append(row)
+                        series[(rid,metric["name"],context_key(metric.get("context",{})),stream)].append(row)
             if len(series)>min(20,budget.get("max_series",20)):
                 raise QueryError("BUDGET_EXCEEDED","local query allows at most 20 series",422)
             frames,returned,input_points = [],0,0
