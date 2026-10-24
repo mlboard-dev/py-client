@@ -12,6 +12,7 @@ import threading
 import time
 import uuid
 
+from .query_limits import QUERY_LIMITS, MAX_ACTIVE_QUERIES, SNAPSHOT_TTL_SECONDS, MIN_DOWNSAMPLE_POINTS
 from .store import readonly
 from .validation import MAX_INT, dumps, context_key
 
@@ -125,8 +126,8 @@ def validate_spec(spec):
     if source.get("kind","scalar")!="scalar":
         raise QueryError("UNSUPPORTED_OPERATION","use /runs/{id}/records for typed local records",422)
     metrics=source.get("metrics",[])
-    if type(metrics) is not list or not 1<=len(metrics)<=20:
-        raise QueryError("BUDGET_EXCEEDED","select 1..20 metrics",422)
+    if type(metrics) is not list or not 1<=len(metrics)<=QUERY_LIMITS["max_series"]:
+        raise QueryError("BUDGET_EXCEEDED",f'select 1..{QUERY_LIMITS["max_series"]} metrics',422)
     identities=set()
     for metric in metrics:
         fields_only(metric,("name","context"),"metric")
@@ -168,9 +169,9 @@ def validate_spec(spec):
     if kind=="downsample":
         if transform.get("algorithm","min_max")!="min_max" or transform.get("algorithm_version","1")!="1":
             raise QueryError("UNSUPPORTED_OPERATION","only min_max algorithm version 1 is supported",422)
-        points=transform.get("points_per_series",2000)
-        if type(points) is not int or not 4<=points<=2000:
-            raise QueryError("BUDGET_EXCEEDED","points_per_series must be 4..2000",422)
+        points=transform.get("points_per_series",QUERY_LIMITS["max_points_per_series"])
+        if type(points) is not int or not MIN_DOWNSAMPLE_POINTS<=points<=QUERY_LIMITS["max_points_per_series"]:
+            raise QueryError("BUDGET_EXCEEDED",f'points_per_series must be {MIN_DOWNSAMPLE_POINTS}..{QUERY_LIMITS["max_points_per_series"]}',422)
     elif set(transform)-{"kind"}:
         raise QueryError("UNSUPPORTED_OPERATION","raw transform has no algorithm or sampling options",422)
     budget=fields_only(spec.get("budget",{}),("max_runs","max_series","max_points","max_scanned_points","max_bytes","timeout_ms","on_exceed","max_points_per_series"),"budget")
@@ -225,7 +226,7 @@ class LocalQuery:
         self.root = root
         self.snapshots = {}
         self.lock = threading.Lock()
-        self.slots = threading.BoundedSemaphore(2)
+        self.slots = threading.BoundedSemaphore(MAX_ACTIVE_QUERIES)
 
     def _page(self, snapshot, offset, limit):
         full = snapshot["result"]
@@ -254,9 +255,9 @@ class LocalQuery:
         axis,bounds = validate_spec(spec)
         fingerprint=hashlib.sha256(dumps({k:v for k,v in spec.items() if k!="page"}).encode()).hexdigest()
         page_spec = spec.get("page",{})
-        limit = page_spec.get("limit",2000)
-        if type(limit) is not int or not 1<=limit<=20000:
-            raise QueryError("INVALID_QUERY","page limit must be 1..20000")
+        limit = page_spec.get("limit",QUERY_LIMITS["max_points_per_series"])
+        if type(limit) is not int or not 1<=limit<=QUERY_LIMITS["max_points"]:
+            raise QueryError("INVALID_QUERY",f'page limit must be 1..{QUERY_LIMITS["max_points"]}')
         cursor = page_spec.get("cursor")
         if cursor:
             if type(cursor) is not str:
@@ -283,7 +284,7 @@ class LocalQuery:
             raise QueryError("QUERY_BUSY","two local queries already running",429)
         db = None
         budget = spec.get("budget",{})
-        deadline = time.monotonic()+min(2000,budget.get("timeout_ms",2000))/1000
+        deadline = time.monotonic()+min(QUERY_LIMITS["timeout_ms"],budget.get("timeout_ms",QUERY_LIMITS["timeout_ms"]))/1000
         try:
             db = readonly(self.root)
             db.set_progress_handler(lambda: int(time.monotonic()>deadline),1000)
@@ -300,9 +301,9 @@ class LocalQuery:
                 transform["kind"]="raw"
             if transform["kind"]=="downsample":
                 transform={"algorithm":"min_max","algorithm_version":"1",**transform}
-            points = min(2000,transform.get("points_per_series",2000),budget.get("max_points_per_series",2000))
-            max_scanned = min(250000,budget.get("max_scanned_points",250000))
-            max_total = min(20000,budget.get("max_points",20000))
+            points = min(QUERY_LIMITS["max_points_per_series"],transform.get("points_per_series",QUERY_LIMITS["max_points_per_series"]),budget.get("max_points_per_series",QUERY_LIMITS["max_points_per_series"]))
+            max_scanned = min(QUERY_LIMITS["max_scanned_points"],budget.get("max_scanned_points",QUERY_LIMITS["max_scanned_points"]))
+            max_total = min(QUERY_LIMITS["max_points"],budget.get("max_points",QUERY_LIMITS["max_points"]))
             selector = spec.get("runs",{})
             ids = selector.get("run_ids")
             sql="SELECT * FROM runs WHERE project=?"
@@ -321,8 +322,8 @@ class LocalQuery:
                 selected = [r for r in selected if search.casefold() in r["run_path"].casefold()]
             for f in selector.get("filters",[]):
                 selected = [r for r in selected if r["state"] in f["value"]]
-            if len(selected)>min(10,budget.get("max_runs",10)):
-                raise QueryError("BUDGET_EXCEEDED","local query allows at most 10 runs",422)
+            if len(selected)>min(QUERY_LIMITS["max_runs"],budget.get("max_runs",QUERY_LIMITS["max_runs"])):
+                raise QueryError("BUDGET_EXCEEDED",f'local query allows at most {QUERY_LIMITS["max_runs"]} runs',422)
             series = defaultdict(list)
             scanned,merged,missing = 0,0,[]
             resolved,producers,ordinals = [],[],{}
@@ -387,8 +388,8 @@ class LocalQuery:
                         row["_x"] = sort_x
                         stream = "primary" if producer["mode"]=="primary" else row["producer_id"]
                         series[(rid,metric["name"],context_key(metric.get("context",{})),stream)].append(row)
-            if len(series)>min(20,budget.get("max_series",20)):
-                raise QueryError("BUDGET_EXCEEDED","local query allows at most 20 series",422)
+            if len(series)>min(QUERY_LIMITS["max_series"],budget.get("max_series",QUERY_LIMITS["max_series"])):
+                raise QueryError("BUDGET_EXCEEDED",f'local query allows at most {QUERY_LIMITS["max_series"]} series',422)
             frames,returned,input_points = [],0,0
             for (rid,name,context,stream),rows in series.items():
                 rows.sort(key=lambda r:(r["_x"],r["ordinal"],r["seq"]))
@@ -407,15 +408,15 @@ class LocalQuery:
             sid = uuid.uuid4().hex
             store_id = db.execute("SELECT value FROM meta WHERE key='store_id'").fetchone()[0]
             generation = sorted((r["id"],r["deletion_generation"]) for r in selected)
-            result = {"schema_version":"mlboard.query-result/v1","query_id":uuid.uuid4().hex,"result_etag":'"'+sid+'"',"complete":True,"consistency":{"snapshot_id":sid,"expires_at":(dt.datetime.now(dt.timezone.utc)+dt.timedelta(seconds=120)).isoformat(),"resolved_runs":resolved},"applied":{"read":{"producers":producers,"session_ordinals":ordinals,"duplicate_steps":duplicate,"policy_version":"1"},"transform":{**transform,"input_points":input_points,"returned_points":returned,"downsampled":input_points>returned},"storage":{"storage_instance_id":store_id,"source_revision":str(max((int(r["data_revision"]) for r in resolved),default=0)),"indexed_revision":str(max((int(r["data_revision"]) for r in resolved),default=0)),"coverage":"retained_history"},"budget":{"max_runs":10,"max_series":20,"max_points":max_total,"max_scanned_points":max_scanned}},"frames":frames,"diagnostics":{"truncated_by":[],"missing":missing[:100],"stale_summaries":[],"scanned_points":scanned,"merged_points":merged,"dropped_source_events":str(sum(r["dropped"] for r in selected)),"warnings":[]},"page":{"next_cursor":None,"returned_rows":returned}}
-            if len(dumps(result).encode())>min(2*1024**2,budget.get("max_bytes",2*1024**2)):
+            result = {"schema_version":"mlboard.query-result/v1","query_id":uuid.uuid4().hex,"result_etag":'"'+sid+'"',"complete":True,"consistency":{"snapshot_id":sid,"expires_at":(dt.datetime.now(dt.timezone.utc)+dt.timedelta(seconds=SNAPSHOT_TTL_SECONDS)).isoformat(),"resolved_runs":resolved},"applied":{"read":{"producers":producers,"session_ordinals":ordinals,"duplicate_steps":duplicate,"policy_version":"1"},"transform":{**transform,"input_points":input_points,"returned_points":returned,"downsampled":input_points>returned},"storage":{"storage_instance_id":store_id,"source_revision":str(max((int(r["data_revision"]) for r in resolved),default=0)),"indexed_revision":str(max((int(r["data_revision"]) for r in resolved),default=0)),"coverage":"retained_history"},"budget":{"max_runs":min(QUERY_LIMITS["max_runs"],budget.get("max_runs",QUERY_LIMITS["max_runs"])),"max_series":min(QUERY_LIMITS["max_series"],budget.get("max_series",QUERY_LIMITS["max_series"])),"max_points":max_total,"max_scanned_points":max_scanned}},"frames":frames,"diagnostics":{"truncated_by":[],"missing":missing[:100],"stale_summaries":[],"scanned_points":scanned,"merged_points":merged,"dropped_source_events":str(sum(r["dropped"] for r in selected)),"warnings":[]},"page":{"next_cursor":None,"returned_rows":returned}}
+            if len(dumps(result).encode())>min(QUERY_LIMITS["max_bytes"],budget.get("max_bytes",QUERY_LIMITS["max_bytes"])):
                 raise QueryError("BUDGET_EXCEEDED","response exceeds byte budget; reduce points",422)
-            snapshot = {"id":sid,"expires":time.monotonic()+120,"result":result,"store":store_id,"generation":generation,"project":pid,"fingerprint":fingerprint}
+            snapshot = {"id":sid,"expires":time.monotonic()+SNAPSHOT_TTL_SECONDS,"result":result,"store":store_id,"generation":generation,"project":pid,"fingerprint":fingerprint}
             if returned>limit:
                 with self.lock:
                     self.snapshots = {key:value for key,value in self.snapshots.items() if value["expires"]>time.monotonic()}
-                    if len(self.snapshots)>=8:
-                        raise QueryError("SNAPSHOT_LIMIT","eight paged queries are active; retry after expiry",429)
+                    if len(self.snapshots)>=QUERY_LIMITS["paged_snapshots"]:
+                        raise QueryError("SNAPSHOT_LIMIT",f'{QUERY_LIMITS["paged_snapshots"]} paged queries are active; retry after expiry',429)
                     self.snapshots[sid] = snapshot
             if time.monotonic()>deadline:
                 raise QueryError("QUERY_TIMEOUT","local query exceeded its time budget",422)

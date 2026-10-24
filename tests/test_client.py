@@ -397,6 +397,9 @@ class ViewerTests(TempCase):
                 with self.assertRaises(urllib.error.HTTPError) as exc: urllib.request.urlopen(urllib.request.Request(base+'/api/v1/projects',headers=headers))
                 self.assertEqual(exc.exception.code,403);exc.exception.close()
             response=json.load(urllib.request.urlopen(urllib.request.Request(base+'/api/v1/projects',headers=auth)))
+            capabilities=json.load(urllib.request.urlopen(urllib.request.Request(base+'/api/v1/capabilities',headers=auth)))
+            from mlboard.query_limits import QUERY_LIMITS
+            self.assertEqual(capabilities['limits'],QUERY_LIMITS)
             pid=response['projects'][0]['id']
             spec={'source':{'kind':'scalar','metrics':[{'name':'train/loss','context':{}}]}}
             request=urllib.request.Request(base+'/api/v1/projects/'+pid+'/query',data=dumps(spec).encode(),headers=auth,method='POST')

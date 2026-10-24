@@ -4,7 +4,8 @@ import uuid
 from unittest.mock import patch
 from test_client import TempCase, manifest, event
 from mlboard.store import RunStore, prepare_media_file
-from mlboard.query import LocalQuery, project_id
+from mlboard.query import LocalQuery, QueryError, project_id
+from mlboard.query_limits import QUERY_LIMITS
 from mlboard.transport import sync_pass
 from mlboard.viewer import ViewerServer
 
@@ -78,3 +79,37 @@ class AuditRegressionTests(TempCase):
             self.assertIn("192.168.1.42:8081",viewer.allowed_hosts)
             self.assertNotIn("evil.invalid:8081",viewer.allowed_hosts)
         finally: viewer.server_close()
+
+    def test_orphan_maintenance_recovers_from_unwritable_database(self):
+        store=RunStore(self.root); m=manifest()
+        with store.db: store.register(m)
+        source=self.root/"sample.txt"; source.write_text("retained")
+        item=prepare_media_file(self.root,{"artifact_id":str(uuid.uuid4()),"path":str(source),"name":"sample"})
+        with store.db: store.publish_media(m["run_id"],item)
+        retained=self.root/item["path"]; os.utime(retained,(0,0))
+        orphan=self.root/"media"/str(uuid.uuid4()); orphan.write_text("orphan"); os.utime(orphan,(0,0))
+        store.db.execute("PRAGMA query_only=ON")
+        try:
+            store.maintenance() # Registration of the aged orphan fails; collector keeps running.
+            self.assertTrue(orphan.exists())
+            self.assertTrue(retained.exists())
+        finally:
+            store.db.execute("PRAGMA query_only=OFF")
+        store.maintenance()
+        self.assertFalse(orphan.exists())
+        self.assertTrue(retained.exists())
+        self.assertEqual(store.db.execute("SELECT COUNT(*) FROM media").fetchone()[0],1)
+        store.close()
+
+    def test_query_execution_uses_advertised_point_ceiling(self):
+        store=RunStore(self.root); m=manifest()
+        with store.db:
+            store.register(m)
+            for seq in range(3): store.append(event(m,seq))
+        query={"source":{"kind":"scalar","metrics":[{"name":"train/loss"}]},"page":{"limit":2}}
+        with patch.dict(QUERY_LIMITS,{"max_points":2}):
+            with self.assertRaises(QueryError) as result:
+                LocalQuery(self.root).execute(project_id("vision"),query)
+            self.assertEqual(result.exception.code,"BUDGET_EXCEEDED")
+        self.assertEqual(LocalQuery(self.root).execute(project_id("vision"),query)["page"]["returned_rows"],2)
+        store.close()

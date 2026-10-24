@@ -345,6 +345,16 @@ class RunStore:
         """Bounded work only between write batches; never inside training."""
         with contextlib.suppress(sqlite3.Error):
             self.db.execute("PRAGMA wal_checkpoint(PASSIVE)")
+        try:
+            self._maintain_files()
+        except (sqlite3.Error, OSError):
+            # Disk-full/read-only/transient IO must not kill the collector. The
+            # next tick restarts reconciliation after storage becomes writable.
+            if self._orphan_scan is not None:
+                self._orphan_scan.close()
+                self._orphan_scan = None
+
+    def _maintain_files(self):
         # Reconcile crash leftovers incrementally; fresh files may still be in
         # the media worker's completion queue and must not be collected.
         if self._orphan_scan is None:

@@ -40,6 +40,8 @@ X 轴支持 step/epoch/wall_time/elapsed_seconds/session_elapsed_seconds/process
 | 查询时间 | 2 秒 |
 | 分页快照 | 最多 8 个，120 秒 |
 
+这些上限由 `mlboard/query_limits.py` 统一定义，查询执行和 `/capabilities` 共用；浏览器启动时读取 capabilities，不再保存另一份服务上限。浏览器单图仍采用最多 600 点的较小绘制预算，多个轴组共用服务公布的总预算。
+
 快照游标绑定查询语义，源替换或选中 run 的 cache 删除使其失效。单页刷新不占用或驱逐分页快照。原始 records/logs 使用复合游标，单 event 可跨页而不遗漏。
 
 分类选择中，两个字段都省略表示不限分类；显式 `path_prefixes:[]` 不选分类组，`include_ungrouped:true` 只额外选根级 run。prefix 只匹配后代，排除同名根 run。目录 GET 的 `path_prefix=` 表示根级。summary 的 key 为 canonical JSON `[name,context]`，value 同时含 name/context。

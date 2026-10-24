@@ -18,6 +18,7 @@ import urllib.parse
 import webbrowser
 
 from .query import LocalQuery, QueryError, project_id, project_name, run_dict
+from .query_limits import QUERY_LIMITS
 from .store import readonly
 from .validation import MAX_INT, dumps, now
 
@@ -177,7 +178,7 @@ class Handler(BaseHTTPRequestHandler):
             raise QueryError("NOT_FOUND","route not found",404)
         route = path[len(prefix):]
         if method=="GET" and route=="/capabilities":
-            return self._json({"profile":"local-viewer","version":"0.1.0","store_id":self.server.store_id,"read_only":True,"event_schema":"mlboard.event/v1","query_schema":"mlboard.query/v1","kinds":["scalar","histogram","confusion_matrix","curve","table","text","media"],"query_kinds":["scalar"],"transforms":["raw","none","min_max"],"unsupported_query_fields":["consistency","reuse","viewport","read.at_revision"],"axes":["step","epoch","wall_time","elapsed_seconds","session_elapsed_seconds","processed_samples"],"limits":{"max_runs":10,"max_series":20,"max_points_per_series":2000,"max_points":20000,"max_scanned_points":250000,"max_bytes":2097152,"timeout_ms":2000,"paged_snapshots":8},"layout_storage":"browser-local"})
+            return self._json({"profile":"local-viewer","version":"0.1.0","store_id":self.server.store_id,"read_only":True,"event_schema":"mlboard.event/v1","query_schema":"mlboard.query/v1","kinds":["scalar","histogram","confusion_matrix","curve","table","text","media"],"query_kinds":["scalar"],"transforms":["raw","none","min_max"],"unsupported_query_fields":["consistency","reuse","viewport","read.at_revision"],"axes":["step","epoch","wall_time","elapsed_seconds","session_elapsed_seconds","processed_samples"],"limits":dict(QUERY_LIMITS),"layout_storage":"browser-local"})
         if method=="POST":
             match = re.fullmatch(r"/projects/([^/]+)/query",route)
             if match:

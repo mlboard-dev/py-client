@@ -9,13 +9,14 @@ const html=fs.readFileSync(new URL('../mlboard/static/index.html',import.meta.ur
 const cohortSource=html.slice(html.indexOf('async function loadChartCohort'),html.indexOf('function chartCard'));
 const visibleSource=html.slice(html.indexOf('function drawVisible'),html.indexOf('function svgEl'));
 const specSource=html.slice(html.indexOf('function querySpec'),html.indexOf('async function workspace'));
+const queryLimits={max_runs:10,max_series:20,max_points_per_series:2000,max_points:20000,max_scanned_points:250000,max_bytes:2097152,timeout_ms:2000};
 function result(points,scanned=points,series=1){
   return {complete:true,frames:Array.from({length:series},()=>({columns:{value:Array(points/series).fill(1)}})),page:{returned_rows:points,next_cursor:null},diagnostics:{scanned_points:scanned,truncated_by:[]}};
 }
 function job(){return {project:'local',axisGroups:['step','epoch','wall_time'].map(axis=>({axis,metrics:[{name:axis}],spec:{x:{field:axis},page:{limit:20000},budget:{max_runs:10,max_series:20,max_points:20000,max_scanned_points:250000,max_bytes:2097152}}}))}}
-function loader(loadChartResponse,{clock=Date,responseBytes=new WeakMap()}={}){
+function loader(loadChartResponse,{clock=Date,responseBytes=new WeakMap(),limits=queryLimits}={}){
   return vm.runInNewContext('('+cohortSource.trim()+')',{
-    loadChartResponse,Date:clock,responseBytes,TextEncoder,DOMException,
+    loadChartResponse,Date:clock,responseBytes,TextEncoder,DOMException,queryLimits:limits,
     codedError:code=>Object.assign(Error(code),{code})
   });
 }
@@ -69,12 +70,25 @@ test('the five-second deadline is shared across axis groups and checked after a 
   assert.deepEqual(seen.map(request=>request.spec.budget.timeout_ms),[2000,100]);
 });
 
+test('cohort requests and accounting follow the advertised capabilities',async()=>{
+  const requests=[];
+  const load=loader(async request=>{requests.push(request);return result(100)},
+    {limits:{...queryLimits,max_series:4,max_points:1000,max_scanned_points:5000,max_bytes:500000,timeout_ms:700}});
+  const loaded=await load({...job(),axisGroups:job().axisGroups.slice(0,2)},()=>true);
+  assert.equal(loaded.points,200);
+  assert.deepEqual(requests.map(request=>request.spec.budget.max_points),[1000,900]);
+  assert.deepEqual(requests.map(request=>request.spec.budget.max_series),[4,3]);
+  assert.equal(requests[0].spec.budget.max_scanned_points,5000);
+  assert.equal(requests[0].spec.budget.max_bytes,500000);
+  assert.ok(requests.every(request=>request.spec.budget.timeout_ms===700));
+});
+
 test('visible cards use their own project, name and context preference within the total series cap',()=>{
   const metrics=[{name:'train/loss',context:{split:'train'}},{name:'train/loss',context:{split:'val'}},{name:'system/memory',context:{}}];
   const values=new Map(),storage={getItem:key=>values.get(key)??null,setItem:(key,value)=>values.set(key,value)};
   local.writeAxis(storage,'project-a',metrics[1],'epoch');local.writeAxis(storage,'project-b',metrics[0],'wall_time');
   let submitted;
-  const context={generation:4,view:'workspace',project:'project-a',groups:new Map([['metrics',metrics]]),selected:new Set(Array.from({length:10},(_,index)=>String(index))),local,preferenceStorage:storage,
+  const context={generation:4,view:'workspace',project:'project-a',groups:new Map([['metrics',metrics]]),selected:new Set(Array.from({length:10},(_,index)=>String(index))),local,preferenceStorage:storage,queryLimits,
     document:{querySelectorAll:()=>[{dataset:{group:'metrics'}}]},prepareChartCards(){},prunePlots(){},chartQueue:{submit(job){submitted=job;return Promise.resolve(true)},cancel(){}}
   };
   vm.createContext(context);vm.runInContext(specSource+'\n'+visibleSource+'\ndrawVisible(4);',context);

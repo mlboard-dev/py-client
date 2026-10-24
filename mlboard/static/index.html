@@ -14,7 +14,7 @@ document.documentElement.dataset.theme=initialPreferences.resolvedTheme;
 const $=s=>document.querySelector(s), el=(tag,text,cls)=>{const n=document.createElement(tag);if(text!==undefined)n.textContent=text;if(cls)n.className=cls;return n};
 const local=MLBoardLocal,preferences=window.mlboardLocalPreferences,preferenceStorage=window.mlboardLocalStorage;
 const bindings=new Set(),responseBytes=new WeakMap();
-let activeError=null,lastChartStatus=null;
+let activeError=null,lastChartStatus=null,queryLimits; // Filled from /capabilities before loading runs.
 const language=()=>preferences.snapshot().language;
 const t=(key,params)=>local.translate(language(),key,params);
 let project='',runs=[],selected=new Set(),view='workspace',series=[],groups=new Map(),smooth=Number(preferenceStorage.getItem('mlboard-smooth')||0),controller=null,generation=0,nextRun=null;
@@ -55,13 +55,14 @@ async function boot(){
       const r=await fetch('/api/local/session',{method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:'{}'});
       if(!r.ok)throw codedError('SESSION_FAILED');
     }
+    queryLimits=Object.freeze((await api('/capabilities')).limits);
     const p=await api('/projects');
     for(const item of p.projects){const option=el('option',item.name);option.value=item.id;$('#project').append(option)}
     if(!p.projects.length){$('#content').append(ui('div','empty.experiments',{},'empty'));return}
     project=p.projects[0].id;await loadRuns();await render();
   }catch(e){error(e)}
 }
-async function loadRuns(append=false){const q=new URLSearchParams({search:$('#search').value,limit:'100'});if(append&&nextRun)q.set('cursor',nextRun);const data=await api('/projects/'+project+'/runs?'+q);runs=append?[...runs,...data.runs]:data.runs;nextRun=data.next_cursor;for(const r of runs)names.set(r.id,r.run_path);if(!append){selected=new Set(runs.slice(0,Math.min(3,runs.length)).map(r=>r.id))}drawRuns()}
+async function loadRuns(append=false){const q=new URLSearchParams({search:$('#search').value,limit:'100'});if(append&&nextRun)q.set('cursor',nextRun);const data=await api('/projects/'+project+'/runs?'+q);runs=append?[...runs,...data.runs]:data.runs;nextRun=data.next_cursor;for(const r of runs)names.set(r.id,r.run_path);if(!append){selected=new Set(runs.slice(0,Math.min(3,queryLimits.max_runs,runs.length)).map(r=>r.id))}drawRuns()}
 function drawRuns(){
   const box=$('#runs');box.replaceChildren();let last=null;
   for(const run of runs){
@@ -69,7 +70,7 @@ function drawRuns(){
     if(prefix!==last){box.append(prefix?el('small',prefix):ui('small','experiments.ungrouped'));last=prefix}
     const label=el('label',undefined,'run'),check=el('input');check.type='checkbox';check.checked=selected.has(run.id);
     check.onchange=()=>{
-      if(check.checked&&selected.size>=10){check.checked=false;error(codedError('RUN_LIMIT'));return}
+      if(check.checked&&selected.size>=queryLimits.max_runs){check.checked=false;error(codedError('RUN_LIMIT'));return}
       check.checked?selected.add(run.id):selected.delete(run.id);render();
     };
     const body=el('span',run.name||run.run_path);
@@ -93,7 +94,7 @@ async function render(){
   }catch(e){if(e.name!=='AbortError')error(e)}
   pruneBindings();
 }
-function querySpec(metrics,axis='step'){return {schema_version:'mlboard.query/v1',runs:{run_ids:[...selected]},source:{kind:'scalar',metrics:metrics.map(m=>({name:m.name,context:m.context||{}}))},x:{field:axis},read:{producers:{mode:'primary'},sessions:{mode:'all'},duplicate_steps:'latest_logical'},transform:{kind:'downsample',algorithm:'min_max',points_per_series:600},page:{limit:20000},budget:{max_runs:10,max_series:20,max_points:20000,max_scanned_points:250000,max_bytes:2097152}}}
+function querySpec(metrics,axis='step'){return {schema_version:'mlboard.query/v1',runs:{run_ids:[...selected]},source:{kind:'scalar',metrics:metrics.map(m=>({name:m.name,context:m.context||{}}))},x:{field:axis},read:{producers:{mode:'primary'},sessions:{mode:'all'},duplicate_steps:'latest_logical'},transform:{kind:'downsample',algorithm:'min_max',points_per_series:Math.min(600,queryLimits.max_points_per_series)},page:{limit:queryLimits.max_points},budget:{max_runs:queryLimits.max_runs,max_series:queryLimits.max_series,max_points:queryLimits.max_points,max_scanned_points:queryLimits.max_scanned_points,max_bytes:queryLimits.max_bytes}}}
 async function workspace(gen){
   const content=$('#content'),tools=el('div',undefined,'tools'),smoothing=el('input');
   smoothing.type='range';smoothing.min=0;smoothing.max=.95;smoothing.step=.05;smoothing.value=smooth;
@@ -187,15 +188,15 @@ async function loadChartResponse(job,current){
 }
 function metricKey(metric){return JSON.stringify([metric.name,Object.fromEntries(Object.keys(metric.context||{}).sort().map(key=>[key,metric.context[key]]))])}
 async function loadChartCohort(job,current){
-  const deadline=Date.now()+5000;
-  const remaining={max_series:20,max_points:20000,max_scanned_points:250000,max_bytes:2097152};
+  const deadline=Date.now()+5000; // Browser cohort deadline includes serial query retries.
+  const remaining=Object.fromEntries(["max_series","max_points","max_scanned_points","max_bytes"].map(key=>[key,queryLimits[key]]));
   const results=[];
   for(const group of job.axisGroups){
     if(!current())throw new DOMException('Query superseded','AbortError');
     const timeout=deadline-Date.now();
     if(timeout<=0)throw codedError('CLIENT_QUERY_TIMEOUT');
     if(Object.values(remaining).some(value=>value<=0))throw codedError('CLIENT_BUDGET_EXCEEDED');
-    const spec={...group.spec,page:{...group.spec.page,limit:remaining.max_points},budget:{...group.spec.budget,...remaining,timeout_ms:Math.min(2000,timeout)}};
+    const spec={...group.spec,page:{...group.spec.page,limit:remaining.max_points},budget:{...group.spec.budget,...remaining,timeout_ms:Math.min(queryLimits.timeout_ms,timeout)}};
     const response=await loadChartResponse({project:job.project,spec,deadline},current);
     if(!current())throw new DOMException('Query superseded','AbortError');
     if(Date.now()>=deadline)throw codedError('CLIENT_QUERY_TIMEOUT');
@@ -207,7 +208,7 @@ async function loadChartCohort(job,current){
     }
     results.push({...group,response});
   }
-  return {groups:results,points:20000-remaining.max_points};
+  return {groups:results,points:queryLimits.max_points-remaining.max_points};
 }
 function chartCard(metric){return [...document.querySelectorAll('.card[data-metric]')].find(n=>n.dataset.metric===metricKey(metric))}
 function prepareChartCards(open,chosen){
@@ -265,7 +266,7 @@ function drawVisible(gen,force=false){
   const open=[...document.querySelectorAll('details.group[open]')];
   const metrics=open.flatMap(g=>groups.get(g.dataset.group)||[]);
   if(!metrics.length){chartQueue.cancel();return Promise.resolve(false)}
-  const maximum=Math.max(1,Math.floor(20/selected.size)),chosen=metrics.slice(0,maximum);
+  const maximum=Math.max(1,Math.floor(queryLimits.max_series/selected.size)),chosen=metrics.slice(0,maximum);
   prepareChartCards(open,chosen);prunePlots();
   const byAxis=new Map();
   for(const metric of chosen){const axis=local.readAxis(preferenceStorage,project,metric);if(!byAxis.has(axis))byAxis.set(axis,[]);byAxis.get(axis).push(metric)}
