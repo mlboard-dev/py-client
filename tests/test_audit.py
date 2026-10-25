@@ -3,13 +3,49 @@ import os
 import uuid
 from unittest.mock import patch
 from test_client import TempCase, manifest, event
-from mlboard.store import RunStore, prepare_media_file
-from mlboard.query import LocalQuery, QueryError, project_id
+from mlboard.store import RunStore, prepare_media_file, readonly
+from mlboard.query import LocalQuery, QueryError, project_id, run_dict, series_directory
 from mlboard.query_limits import QUERY_LIMITS
 from mlboard.transport import sync_pass
 from mlboard.viewer import ViewerServer
 
 class AuditRegressionTests(TempCase):
+    def test_summary_and_directory_merge_numeric_context_before_paging(self):
+        store=RunStore(self.root)
+        m=manifest()
+        with store.db:
+            store.register(m)
+            for seq,(fold,value,step) in enumerate(((1.0,9,0),(1,8,0),(1.0,3,1),(True,7,0),("1",6,0))):
+                body=event(m,seq,value,step=step)
+                body["fields"][0]["context"]={"fold":fold}
+                body["fields"].append({"name":"details","kind":"text","context":{"fold":fold},"payload":{"schema_version":"mlboard.text/v1","text":str(seq)}})
+                store.append(body)
+        originals=[tuple(r) for r in store.db.execute("SELECT body,hash FROM events ORDER BY revision")]
+        for schema in (4,3):
+            with self.subTest(schema=schema):
+                if schema==3:
+                    with store.db:
+                        for table in ("scalars","records"):
+                            store.db.execute(f"DROP INDEX {table}_context_identity")
+                            store.db.execute(f"ALTER TABLE {table} DROP COLUMN context_key")
+                        store.db.execute("UPDATE meta SET value='3' WHERE key='schema_version'")
+                with readonly(self.root) as db:
+                    summary=run_dict(db,db.execute("SELECT * FROM runs").fetchone())["summary"]
+                    self.assertEqual(len(summary),3) # true, 1 and "1" remain distinct
+                    numeric=next(x for x in summary.values() if type(x["context"]["fold"]) is int)
+                    self.assertEqual((numeric["count"],numeric["min"],numeric["max"],numeric["last"]),(2,3,8,3))
+                    # Request one directory entry per page, never split aliases.
+                    entries=[dict(series_directory(db,m["run_id"],1,i)[0]) for i in range(6)]
+                    self.assertEqual(len({(r["name"],r["kind"],r["context"]) for r in entries}),6)
+                    self.assertEqual([r["count"] for r in entries if r["context"]=='{"fold":1}'],[3,3])
+                    self.assertEqual(series_directory(db,m["run_id"],1,6),[])
+                    self.assertEqual(db.execute("SELECT value FROM meta WHERE key='schema_version'").fetchone()[0],str(schema))
+                q={"runs":{"run_ids":[m["run_id"]]},"source":{"metrics":[{"name":"train/loss","context":{"fold":1}}]},"x":{"field":"step"},"transform":{"kind":"raw"}}
+                result=LocalQuery(self.root).execute(project_id("vision"),q)
+                self.assertEqual(result["frames"][0]["row_count"],numeric["count"])
+                self.assertEqual([tuple(r) for r in store.db.execute("SELECT body,hash FROM events ORDER BY revision")],originals)
+        store.close()
+
     def test_numeric_context_indexes_preserve_event_identity_and_migrate(self):
         store=RunStore(self.root)
         m=manifest(); e=event(m,0); e["fields"][0]["context"]={"fold":1.0,"zero":-0.0}

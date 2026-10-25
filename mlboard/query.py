@@ -34,6 +34,24 @@ def project_name(db, pid):
     raise QueryError("NOT_FOUND","project not found",404)
 
 
+def context_identity_sql(db, alias=""):
+    """Schema 3 stays read-only; schema 4 uses the persisted canonical index."""
+    prefix = alias + "." if alias else ""
+    return (f"mlboard_context_key({prefix}context)" if getattr(db,"legacy_context_index",False)
+            else prefix + "context_key")
+
+
+def series_directory(db, rid, limit, offset):
+    identity = context_identity_sql(db)
+    # Merge numeric aliases before sorting/paging, for scalar and native records.
+    # Directory counts intentionally include raw records, unlike exact summaries.
+    return db.execute(f"""SELECT name,'scalar' kind,{identity} context,COUNT(*) count
+      FROM scalars WHERE run_id=? GROUP BY name,{identity}
+      UNION ALL SELECT name,kind,{identity} context,COUNT(*) count
+      FROM records WHERE run_id=? GROUP BY name,kind,{identity}
+      ORDER BY name,kind,context LIMIT ? OFFSET ?""",(rid,rid,limit+1,offset)).fetchall()
+
+
 def run_dict(db, row):
     item = dict(row)
     for name in ("config","tags"):
@@ -43,20 +61,21 @@ def run_dict(db, row):
     item["data_revision"] = str(db.execute("SELECT COALESCE(MAX(revision),0) FROM events WHERE run_id=?",(item["id"],)).fetchone()[0])
     item["summary"] = {}
     # Summary deliberately uses the same primary/latest-logical policy as curves.
-    rows = db.execute("""WITH logical AS (
-      SELECT s.*, ROW_NUMBER() OVER(PARTITION BY s.name,s.context,COALESCE(s.step,-s.event_revision)
+    identity = context_identity_sql(db, "s")
+    rows = db.execute(f"""WITH logical AS (
+      SELECT s.*, {identity} canonical_context, ROW_NUMBER() OVER(PARTITION BY s.name,{identity},COALESCE(s.step,-s.event_revision)
         ORDER BY s.ordinal DESC,s.seq DESC,s.event_revision DESC) AS rn
       FROM scalars s JOIN sessions t ON t.id=s.session_id
       WHERE s.run_id=? AND s.producer_id=t.primary_producer),
       canonical AS (SELECT * FROM logical WHERE rn=1), last_values AS (
-        SELECT *,ROW_NUMBER() OVER(PARTITION BY name,context
+        SELECT *,ROW_NUMBER() OVER(PARTITION BY name,canonical_context
           ORDER BY ordinal DESC,seq DESC,event_revision DESC) last_rank FROM canonical)
-      SELECT name,context,MIN(CASE WHEN value_state='finite' THEN value END) minimum,
+      SELECT name,canonical_context context,MIN(CASE WHEN value_state='finite' THEN value END) minimum,
         MAX(CASE WHEN value_state='finite' THEN value END) maximum,COUNT(*) n,
         MAX(CASE WHEN last_rank=1 THEN value END) last,
         MAX(CASE WHEN last_rank=1 THEN value_state END) last_state,
         COUNT(CASE WHEN value_state='finite' THEN 1 END) finite_count
-      FROM last_values GROUP BY name,context LIMIT 1000""",(item["id"],)).fetchall()
+      FROM last_values GROUP BY name,canonical_context ORDER BY name,canonical_context LIMIT 1000""",(item["id"],)).fetchall()
     for metric in rows:
         key=dumps([metric["name"],json.loads(metric["context"])])
         item["summary"][key] = {"name":metric["name"],"min":metric["minimum"],"max":metric["maximum"],"count":metric["n"],"last":metric["last"],"value_state":metric["last_state"],"context":json.loads(metric["context"]),"finite_count":metric["finite_count"]}
@@ -345,7 +364,7 @@ class LocalQuery:
                             continue
                         producers.append({"run_id":rid,"session_id":s["id"],"producer_id":p[0],"logical_stream":"primary" if producer["mode"]=="primary" else p[0]})
                 for metric in metrics:
-                    identity_column = "mlboard_context_key(s.context)" if db.legacy_context_index else "s.context_key"
+                    identity_column = context_identity_sql(db, "s")
                     sql = f"SELECT s.* FROM scalars s JOIN sessions t ON t.id=s.session_id WHERE s.run_id=? AND s.name=? AND {identity_column}=? AND s.event_revision<=?"
                     params = [rid,metric["name"],context_key(metric.get("context",{})),revision]
                     if producer["mode"]=="primary":

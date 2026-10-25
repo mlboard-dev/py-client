@@ -17,7 +17,7 @@ import time
 import urllib.parse
 import webbrowser
 
-from .query import LocalQuery, QueryError, project_id, project_name, run_dict
+from .query import LocalQuery, QueryError, project_id, project_name, run_dict, series_directory
 from .query_limits import QUERY_LIMITS
 from .store import readonly
 from .validation import MAX_INT, dumps, now
@@ -230,7 +230,7 @@ class Handler(BaseHTTPRequestHandler):
                 if kind=="series":
                     offset = max(0,int(params.get("cursor",["0"])[0]))
                     limit = bounded_int(params,"limit",200,1000)
-                    rows = db.execute("SELECT name,'scalar' kind,context,COUNT(*) count FROM scalars WHERE run_id=? GROUP BY name,context UNION ALL SELECT name,kind,context,COUNT(*) count FROM records WHERE run_id=? GROUP BY name,kind,context ORDER BY name LIMIT ? OFFSET ?",(rid,rid,limit+1,offset)).fetchall()
+                    rows = series_directory(db,rid,limit,offset)
                     return self._json({"series":[{"id":dumps([r["name"],r["kind"],json.loads(r["context"])]),"name":r["name"],"kind":r["kind"],"context":json.loads(r["context"]),"count":r["count"]} for r in rows[:limit]],"next_cursor":str(offset+limit) if len(rows)>limit else None})
                 if kind=="artifacts":
                     rows = [dict(r) for r in db.execute("SELECT id,name,kind,size,mime,sha256,metadata FROM media WHERE run_id=? LIMIT 1000",(rid,))]
