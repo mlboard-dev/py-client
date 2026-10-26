@@ -12,6 +12,7 @@ import threading
 import time
 
 from .validation import dumps
+from .config_json import loads_config_json
 
 MAX_FRAME = 256 * 1024
 
@@ -31,7 +32,19 @@ def extract(buffer):
             raise ValueError("IPC frame too large")
         if len(buffer) < length + 4:
             break
-        result.append(json.loads(buffer[4:4+length]))
+        raw = buffer[4:4+length]
+        try:
+            value = json.loads(raw)
+        except ValueError:
+            # A config integer token can exceed Python's decimal-int limit.
+            # Ordinary frames retain the normal decoder and its validation.
+            value = loads_config_json(raw,fields=True)
+            if type(value) is not dict or "config" not in value:
+                raise
+        else:
+            if type(value) is dict and "config" in value:
+                value = loads_config_json(raw,fields=True)
+        result.append(value)
         del buffer[:4+length]
     return result
 

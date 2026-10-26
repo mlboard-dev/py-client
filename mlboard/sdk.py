@@ -1,5 +1,6 @@
 """Training-first SDK. log() does no network, filesystem I/O or tensor conversion."""
 from __future__ import annotations
+from .config_json import config_value
 
 from collections import OrderedDict, deque
 from dataclasses import asdict, dataclass
@@ -76,7 +77,7 @@ class Run:
         self._snapshot_at = 0.0
         self._last_error = None
         self._wait_remote = False
-        self._register = {"kind":"register","id":"register","token":uuid.uuid4().hex,"run_id":self.id,"session_id":self.session_id,"session_ordinal":session_ordinal,"producer_id":producer_id,"primary_producer":primary_producer,"project":project,"run_path":run_path,"config":json_value(config or {}),"tags":json_value(tags or []),"name":text(name or run_path.split('/')[-1],"name",200),"retention":retention,"sync":sync,"server":normalize_server(server or os.environ.get("MLBOARD_SERVER","http://127.0.0.1:8080")),"api_key":api_key or os.environ.get("MLBOARD_API_KEY"),"create_project":bool(create_project),"organization":organization}
+        self._register = {"kind":"register","id":"register","token":uuid.uuid4().hex,"run_id":self.id,"session_id":self.session_id,"session_ordinal":session_ordinal,"producer_id":producer_id,"primary_producer":primary_producer,"project":project,"run_path":run_path,"config":config_value(config if config is not None else {}),"tags":json_value(tags or []),"name":text(name or run_path.split('/')[-1],"name",200),"retention":retention,"sync":sync,"server":normalize_server(server or os.environ.get("MLBOARD_SERVER","http://127.0.0.1:8080")),"api_key":api_key or os.environ.get("MLBOARD_API_KEY"),"create_project":bool(create_project),"organization":organization}
         if type(self._register["config"]) is not dict or type(self._register["tags"]) is not list or any(type(t) is not str for t in self._register["tags"]):
             raise ValidationError("config must be an object; tags must be a list of strings")
         self._register_frame = frame(self._register)

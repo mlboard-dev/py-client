@@ -9,6 +9,7 @@ import re
 import unicodedata
 import urllib.parse
 import ipaddress
+from .config_json import dumps_config_json
 
 MAX_INT = (1 << 63) - 1
 MAX_EVENT = 64 * 1024
@@ -100,7 +101,11 @@ def now():
 
 
 def dumps(value):
-    return json.dumps(value, ensure_ascii=False, allow_nan=False, separators=(",", ":"), sort_keys=True)
+    try:
+        return json.dumps(value, ensure_ascii=False, allow_nan=False, separators=(",", ":"), sort_keys=True)
+    except TypeError:
+        # Exact config tokens are intentionally unsupported by the standard encoder.
+        return dumps_config_json(value)
 
 
 def digest(payload):

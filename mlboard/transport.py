@@ -12,6 +12,7 @@ import uuid
 
 from .store import readonly
 from .validation import dumps, normalize_server
+from .config_json import loads_config_json
 
 
 class SyncError(RuntimeError):
@@ -33,7 +34,7 @@ class HTTP:
         self.opener = urllib.request.build_opener(NoRedirect())
 
     def request(self, method, path, body=None, headers=None):
-        hdr = {"Accept":"application/json"}
+        hdr = {"Accept":"application/json","MLBoard-Config-Numbers":"exact-v1"}
         if self.key:
             hdr["Authorization"] = "Bearer " + self.key
         if headers:
@@ -48,7 +49,7 @@ class HTTP:
                 raw = response.read(2 * 1024**2 + 1)
                 if len(raw) > 2 * 1024**2:
                     raise SyncError("remote response exceeds 2 MiB")
-                result = json.loads(raw) if raw else {}
+                result = (loads_config_json(raw,fields=True) if re.search(r"/(runs|shares)(/|\?|$)",path) and not re.search(r"/(query|events|logs|series)(\?|$)",path) else json.loads(raw)) if raw else {}
                 if type(result) is not dict:
                     raise SyncError("remote response is not a JSON object")
                 return result
@@ -203,7 +204,7 @@ def sync_pass(root, config):
                 if run["remote_project"] and run["remote_project"] != pid:
                     raise SyncError("remote project mapping conflict")
                 result["project_id"] = pid
-                http.request("POST",f"/projects/{pid}/runs",json.loads(run["initial_body"]))
+                http.request("POST",f"/projects/{pid}/runs",loads_config_json(run["initial_body"],fields=True))
                 sessions = [dict(s) for s in db.execute("SELECT * FROM sessions WHERE run_id=? ORDER BY ordinal",(rid,))]
                 for session in sessions:
                     sid = session["id"]

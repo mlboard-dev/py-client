@@ -12,7 +12,9 @@ import mimetypes
 from pathlib import Path
 import re
 import secrets
+import socket
 import sqlite3
+import threading
 import time
 import urllib.parse
 import webbrowser
@@ -21,6 +23,7 @@ from .query import LocalQuery, QueryError, project_id, project_name, run_dict, s
 from .query_limits import QUERY_LIMITS
 from .store import readonly
 from .validation import MAX_INT, dumps, now
+from .viewer_limits import BoundedRequestReader, HeaderLimitError, ViewerLimits
 
 
 def bounded_int(params, name, default, maximum):
@@ -56,7 +59,8 @@ def encode_cursor(parts):
 class ViewerServer(ThreadingHTTPServer):
     daemon_threads = True
     allow_reuse_address = False
-    def __init__(self, root, address=("127.0.0.1",8081), *, token=None, public_url=None):
+    request_queue_size = 16
+    def __init__(self, root, address=("127.0.0.1",8081), *, token=None, public_url=None, limits=None):
         try:
             loopback = address[0]=="localhost" or ipaddress.ip_address(address[0]).is_loopback
         except ValueError:
@@ -75,21 +79,82 @@ class ViewerServer(ThreadingHTTPServer):
         self.access_token = token or secrets.token_urlsafe(32)
         self.cookie_token = secrets.token_urlsafe(32)
         self.queries = LocalQuery(self.root)
+        self.limits = limits or ViewerLimits()
+        self._connection_lock = threading.Lock()
+        self._connections = set()
+        self._closing = False
         super().__init__(address,Handler)
         host,port = self.server_address[:2]
         host = f"[{host}]" if ":" in host else host
         self.allowed_hosts = {f"{host}:{port}",f"localhost:{port}",f"127.0.0.1:{port}"} if loopback else {f"{host}:{port}"}
         if public:
             self.allowed_hosts.add(public.netloc)
-        self.allowed_origins = {"http://"+h for h in self.allowed_hosts}
-        if public:
-            self.allowed_origins.add(public_url.rstrip("/"))
+        self.allowed_origins = {public_url.rstrip("/")} if public else {"http://"+h for h in self.allowed_hosts}
         self.public_url = public_url.rstrip("/") if public else f"http://{host}:{port}"
+        self.secure_cookies = bool(public and public.scheme == "https")
+
+    def process_request(self, request, client_address):
+        # Acquire before ThreadingMixIn creates a handler thread. Authentication
+        # cannot protect a connection that has not finished its first headers.
+        with self._connection_lock:
+            admitted = not self._closing and len(self._connections) < self.limits.connections
+            if admitted:
+                self._connections.add(request)
+        if not admitted:
+            self.shutdown_request(request)
+            return
+        try:
+            request.settimeout(self.limits.idle_seconds)
+            super().process_request(request, client_address)
+        except BaseException:
+            with self._connection_lock:
+                self._connections.discard(request)
+            raise
+
+    def process_request_thread(self, request, client_address):
+        try:
+            super().process_request_thread(request, client_address)
+        finally:
+            with self._connection_lock:
+                self._connections.discard(request)
+
+    def server_close(self):
+        with self._connection_lock:
+            self._closing = True
+            connections = list(self._connections)
+        for connection in connections:
+            with contextlib.suppress(OSError):
+                connection.shutdown(socket.SHUT_RDWR)
+        super().server_close()
 
 
 class Handler(BaseHTTPRequestHandler):
     server_version = "MLBoardLocal/0.1"
     protocol_version = "HTTP/1.1"
+
+    def setup(self):
+        super().setup()
+        self.rfile.close()
+        self.rfile = BoundedRequestReader(self.connection, self.server.limits)
+
+    def handle_one_request(self):
+        self.rfile.begin_headers()
+        try:
+            super().handle_one_request()
+        except HeaderLimitError:
+            self.close_connection = True
+            self.request_version = getattr(self, "request_version", "HTTP/1.1")
+            self.requestline = getattr(self, "requestline", "")
+            self.command = getattr(self, "command", None)
+            with contextlib.suppress(OSError):
+                self.send_error(431, "Request headers exceed byte limit")
+        except OSError:
+            self.close_connection = True
+
+    def parse_request(self):
+        parsed = super().parse_request()
+        self.rfile.finish_read()
+        return parsed
 
     def log_message(self, *_):
         # URLs, cookies and bearer keys must never appear in access logs.
@@ -102,6 +167,8 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Cache-Control","no-store")
         self.send_header("X-Content-Type-Options","nosniff")
         self.send_header("Referrer-Policy","no-referrer")
+        if self.close_connection:
+            self.send_header("Connection", "close")
         self.send_header("Content-Security-Policy","default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; object-src 'none'; base-uri 'none'")
         if extra:
             for key,value in extra.items():
@@ -133,8 +200,10 @@ class Handler(BaseHTTPRequestHandler):
         return bearer
 
     def _body(self):
-        if self.headers.get("Transfer-Encoding"):
+        if self.headers.get_all("Transfer-Encoding"):
             raise QueryError("INVALID_REQUEST","chunked requests are unsupported")
+        if len(self.headers.get_all("Content-Length", [])) != 1:
+            raise QueryError("INVALID_REQUEST","one Content-Length is required")
         try:
             size = int(self.headers.get("Content-Length","0"))
         except ValueError:
@@ -142,7 +211,12 @@ class Handler(BaseHTTPRequestHandler):
         if not 0<size<=256*1024:
             raise QueryError("BODY_TOO_LARGE","request must be 1..262144 bytes",413)
         try:
-            value = json.loads(self.rfile.read(size))
+            self.rfile.begin_body()
+            try:
+                body = self.rfile.read(size)
+            finally:
+                self.rfile.finish_read()
+            value = json.loads(body)
         except (ValueError,RecursionError):
             raise QueryError("INVALID_JSON","invalid JSON body") from None
         if type(value) is not dict:
@@ -172,7 +246,8 @@ class Handler(BaseHTTPRequestHandler):
             if not bearer:
                 raise QueryError("UNAUTHORIZED","bearer bootstrap required",401)
             self._body()
-            return self._json({"authenticated":True},extra={"Set-Cookie":f"mlboard_local={self.server.cookie_token}; HttpOnly; SameSite=Strict; Path=/"})
+            secure = "; Secure" if self.server.secure_cookies else ""
+            return self._json({"authenticated":True},extra={"Set-Cookie":f"mlboard_local={self.server.cookie_token}; HttpOnly; SameSite=Strict; Path=/{secure}"})
         prefix = "/api/v1"
         if not path.startswith(prefix+"/"):
             raise QueryError("NOT_FOUND","route not found",404)
@@ -283,17 +358,20 @@ class Handler(BaseHTTPRequestHandler):
             db.close()
 
     def _handle(self, method):
-        self.connection.settimeout(5)
+        self.connection.settimeout(self.server.limits.idle_seconds)
         try:
             self._route(method)
         except QueryError as exc:
+            # Do not parse an unread/invalid body as a new keep-alive request.
+            self.close_connection = True
             self._json({"error":{"code":exc.code,"message":str(exc),"retryable":exc.status in (429,503)},"request_id":secrets.token_hex(8)},exc.status)
         except (ValueError,KeyError,TypeError):
+            self.close_connection = True
             self._json({"error":{"code":"INVALID_ARGUMENT","message":"invalid request argument","retryable":False}},400)
         except sqlite3.OperationalError:
             self._json({"error":{"code":"SOURCE_BUSY","message":"source unavailable or query exceeded 2-second read budget","retryable":True}},503)
         except (BrokenPipeError,ConnectionResetError,TimeoutError):
-            pass
+            self.close_connection = True
         except OSError:
             self._json({"error":{"code":"SOURCE_UNAVAILABLE","message":"local source unavailable","retryable":True}},503)
 

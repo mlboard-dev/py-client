@@ -1,5 +1,6 @@
 """Bounded local queries over collector-maintained typed indexes."""
 from __future__ import annotations
+from .config_json import loads_config_json
 
 from collections import defaultdict
 import datetime as dt
@@ -55,7 +56,7 @@ def series_directory(db, rid, limit, offset):
 def run_dict(db, row):
     item = dict(row)
     for name in ("config","tags"):
-        item[name] = json.loads(item[name])
+        item[name] = loads_config_json(item[name]) if name=="config" else json.loads(item[name])
     item["project_id"] = project_id(item["project"])
     item["run_version"] = str(item["manifest_revision"])
     item["data_revision"] = str(db.execute("SELECT COALESCE(MAX(revision),0) FROM events WHERE run_id=?",(item["id"],)).fetchone()[0])

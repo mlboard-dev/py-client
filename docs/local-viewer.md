@@ -59,3 +59,9 @@ mlboard serve --logdir ./outputs/runs --host 0.0.0.0 --port 8081 \
 ```
 
 `--host` 只指定监听网卡；`--public-url` 决定允许的 Host/Origin 和打印的访问链接。其他 Host 仍拒绝。外部访问应使用可信网络或 HTTPS 反向代理。
+
+请求在创建处理线程前限制为最多 32 个活动连接。首次请求及 keep-alive 后续请求的请求行与请求头共用 32 KiB 字节上限、5 秒总期限；每次读取的空闲期限也是 5 秒，持续滴流不会延长总期限。JSON 请求体最多 256 KiB、总读取期限 10 秒。超限连接关闭并释放额度，正常静态文件与查询仍使用同一鉴权入口。
+
+通过 HTTPS 反向代理访问时，将 `--public-url` 设置为实际 HTTPS origin，代理保留该 `Host` 并原样转发路径；不要去掉 Origin 检查。浏览器会话 cookie 自动带 `Secure`。只有所配置的公开 origin 可发起带 Origin 的请求，不信任客户端自行提供的 `X-Forwarded-Host` 或 `X-Forwarded-Proto`。查看器目前要求部署在域名根路径，不支持在 `/mlboard/` 子路径下改写访问。
+
+Config 中的 int64、大整数及精确十进制通过专用 lossless JSON 边界读取和输出，仍为 JSON number；数字字符串仍为 string。Web 参数编辑/比较/原始 JSON 导出也保留该区分。旧超展开预算配置可查看/下载原 JSON，不通过浮点重新保存。训练曲线仍为浮点标量，不采用任意精度采样。

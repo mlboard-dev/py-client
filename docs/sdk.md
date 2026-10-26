@@ -81,3 +81,20 @@ NaN/Inf 标量保存显式状态，JSON 中数值为 null；图表显示缺口�
 ### 连续媒体上报
 
 `log_media()` 仍只把元数据加入有界内存队列，文件读取和复制发生在 collector。collector 的媒体队列暂时繁忙时，发送线程保留原事件身份并每 100 ms 重试；不会把背压计为永久丢失。`finish()` 在已接受的事件和媒体收到持久化确认后才发送结束命令。文件不存在、配额超限等永久错误仍显式报告。
+
+## 精确 config 数字
+
+Config 保持 JSON 的 number/string 区分；大整数不会转成字符串。`config={"seed": 9223372036854775807}` 支持精确 Python `int`。需要保留十进制小数或原指数词元时，可从原 JSON 无损读取，或显式传 `decimal.Decimal`：
+
+```python
+from decimal import Decimal
+from mlboard.config_json import loads_config_json, dumps_config_json
+
+config = loads_config_json('{"seed":9007199254740993,"rate":0.123456789012345678901,"text":"9007199254740993"}')
+config["other_rate"] = Decimal("0.0000000000000000000123456789")
+# 传给 mlboard.init(config=...) 时会验证并转换 Decimal。
+```
+
+Config 专用边界为 64 KiB、20 层、4096 个节点。普通 Python float 使用其已有数值；SDK 无法恢复调用前已被 float 舍入的精度。`loads_config_json` 的小数/指数值及超过 640 位的整数使用 `JSONNumber` 保存词元，避免依赖 Python 的全局整数转换限制。`dumps_config_json` 输出裸 JSON number；普通 `json.dumps` 会拒绝这些值，避免误当字符串或浮点保存。数学等值与原词元不同：`1`、`1.0`、`1e0` 数值相等，但原 JSON 导出可保留各自词元。
+
+Collector IPC、本地配置读取、同步重试与 HTTP 客户端保留该表示。`HTTP.request` 在显式 config PATCH 时声明 `MLBoard-Config-Numbers: exact-v1`。服务器会拒绝缺少该声明、可能覆盖精确旧值的 config 修改；只改名称/状态不需要重传 config。该 header 表示编解码能力，不授予权限。训练 scalar 与 context 继续原来的浮点/安全整数限制，不因 config 放宽。
