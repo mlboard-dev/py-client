@@ -107,7 +107,7 @@ class HTTP:
 def publish_state(http, rid, state):
     """Publish against a fresh revision, with bounded retries for concurrent edits."""
     for attempt in range(3):
-        remote = http.request("GET",f"/runs/{rid}")
+        remote = http.request("GET",f"/runs/{rid}?include_summary=false")
         revision = remote.get("run_version")
         if type(revision) not in (str,int) or not re.fullmatch(r"[0-9]{1,19}",str(revision)):
             raise SyncError("remote run has no valid run_version")

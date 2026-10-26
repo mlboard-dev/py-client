@@ -7,6 +7,7 @@ import os
 import signal
 import threading
 import time
+import urllib.parse
 from unittest.mock import patch
 
 import mlboard
@@ -34,7 +35,7 @@ class OrganizationRemote:
                 if self.path=='/api/v1/projects': return self.reply({'projects':peer.projects})
                 if self.path=='/api/v1/organizations':
                     return self.reply({'organizations':peer.organizations}) if discover else self.reply({'error':{'code':'FORBIDDEN'}},403)
-                rid=self.path.rsplit('/',1)[-1];self.reply({'id':rid,'run_version':'1','state':peer.states.get(rid,'running')})
+                rid=urllib.parse.urlsplit(self.path).path.rsplit('/',1)[-1];self.reply({'id':rid,'run_version':'1','state':peer.states.get(rid,'running')})
             def do_POST(self):
                 body=json.loads(self.rfile.read(int(self.headers['Content-Length'])));peer.requests.append(('POST',self.path,body))
                 if self.path=='/api/v1/projects':

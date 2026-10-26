@@ -50,7 +50,10 @@ class Remote:
                 self.remember()
                 if self.path=="/api/v1/projects":
                     return self.reply({"projects":[{"id":"project-"+peer.project,"slug":peer.project}]})
-                rid=self.path.rsplit("/",1)[-1]
+                parts=urllib.parse.urlsplit(self.path)
+                rid=parts.path.rsplit("/",1)[-1]
+                if urllib.parse.parse_qs(parts.query).get("include_summary") != ["false"]:
+                    return self.reply({"error":{"code":"summary_not_requested"}},422)
                 self.reply({"id":rid,"state":peer.states.get(rid,"running"),"run_version":str(peer.versions.get(rid,1))})
             def do_POST(self):
                 self.remember()
@@ -107,6 +110,8 @@ class RemoteCheckpointTests(TempCase):
                         store.apply_sync_result(result)
                 self.assertTrue(store.status()["remote_complete"])
                 self.assertEqual(remote.states[m["run_id"]],"finished")
+                reads=[path for method,path,_ in remote.requests if method=="GET" and "/runs/" in path]
+                self.assertEqual(reads,[f"/api/v1/runs/{m['run_id']}?include_summary=false"])
                 row=store.db.execute("SELECT manifest_revision,remote_manifest_revision FROM runs").fetchone()
                 self.assertEqual(row[0],row[1])
             finally:
